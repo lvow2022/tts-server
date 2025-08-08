@@ -30,33 +30,20 @@ DEVICE: str = "auto"       # 推理设备 (auto/cpu/cuda)
 
 ```bash
 # 创建新的 conda 环境
-conda create -n tts-server python=3.9
+conda create -n tts-server python=3.10
 
 # 激活环境
 conda activate tts-server
 ```
 
-#### 2. 安装 PyTorch（GPU 支持）
-
-```bash
-# 对于 CUDA GPU (NVIDIA)
-conda install pytorch torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
-
-# 对于 Apple Silicon (M1/M2/M3)
-conda install pytorch torchaudio -c pytorch
-
-# 或者使用 pip 安装（如果 conda 版本不可用）
-pip install torch torchaudio
-```
-
-#### 3. 安装其他依赖
+#### 2. 安装其他依赖
 
 ```bash
 # 安装项目依赖
 pip install -r requirements.txt
 ```
 
-#### 4. 启动服务
+#### 3. 启动服务
 
 ```bash
 # 启动 TTS 服务（首次运行会自动下载模型）
