@@ -28,6 +28,10 @@ class TTSEngine:
         # 在初始化时直接加载模型，而不是使用threading.local()
         self.model = self._load_model()
         
+        # 强制GPU使用（如果是CUDA设备）
+        if self.device == "cuda":
+            self.force_gpu_usage()
+        
         logger.info(f"TTS Engine {engine_id} initialized on device: {self.device}")
     
     def get_status(self) -> Dict[str, Any]:
@@ -109,8 +113,22 @@ class TTSEngine:
                         device = next(model.synthesizer.model.parameters()).device
                         logger.info(f"Engine {self.engine_id} model loaded on device: {device}")
                         logger.info(f"Engine {self.engine_id} GPU memory usage: {memory_used:.2f} MB")
+                    elif hasattr(model, 'model'):
+                        # 尝试其他可能的模型属性
+                        device = next(model.model.parameters()).device
+                        logger.info(f"Engine {self.engine_id} model loaded on device: {device}")
+                        logger.info(f"Engine {self.engine_id} GPU memory usage: {memory_used:.2f} MB")
                     else:
                         logger.warning(f"Engine {self.engine_id} model device verification failed")
+                        # 尝试获取模型的任何参数来确定设备
+                        try:
+                            for name, param in model.named_parameters():
+                                if param.requires_grad:
+                                    device = param.device
+                                    logger.info(f"Engine {self.engine_id} model parameter '{name}' on device: {device}")
+                                    break
+                        except Exception as e:
+                            logger.error(f"Engine {self.engine_id} failed to verify model device: {e}")
             else:
                 # CPU 设备
                 model = TTS(
@@ -161,6 +179,23 @@ class TTSEngine:
                         logger.debug(f"Engine {self.engine_id} model is on device: {device}")
                         if str(device) != f"cuda:{gpu_id}":
                             logger.warning(f"Engine {self.engine_id} model is on wrong device: {device}, expected cuda:{gpu_id}")
+                    elif hasattr(self.model, 'model'):
+                        device = next(self.model.model.parameters()).device
+                        logger.debug(f"Engine {self.engine_id} model is on device: {device}")
+                        if str(device) != f"cuda:{gpu_id}":
+                            logger.warning(f"Engine {self.engine_id} model is on wrong device: {device}, expected cuda:{gpu_id}")
+                    else:
+                        # 尝试其他方式验证设备
+                        try:
+                            for name, param in self.model.named_parameters():
+                                if param.requires_grad:
+                                    device = param.device
+                                    logger.debug(f"Engine {self.engine_id} model parameter '{name}' on device: {device}")
+                                    if str(device) != f"cuda:{gpu_id}":
+                                        logger.warning(f"Engine {self.engine_id} model parameter '{name}' is on wrong device: {device}, expected cuda:{gpu_id}")
+                                    break
+                        except Exception as e:
+                            logger.error(f"Engine {self.engine_id} failed to verify model device during inference: {e}")
             
             # 执行TTS推理 - 对于单说话人模型，不传入 speaker 参数
             audio = self.model.tts(text)
@@ -228,6 +263,31 @@ class TTSEngine:
                 torch.cuda.set_device(gpu_id)
                 torch.cuda.empty_cache()
                 logger.debug(f"Engine {self.engine_id} cleared GPU cache")
+    
+    def force_gpu_usage(self):
+        """强制模型使用GPU"""
+        if self.device == "cuda":
+            import torch
+            if torch.cuda.is_available():
+                gpu_id = self.engine_id % torch.cuda.device_count()
+                torch.cuda.set_device(gpu_id)
+                
+                # 强制将模型移动到GPU
+                try:
+                    if hasattr(self.model, 'to'):
+                        self.model.to(f"cuda:{gpu_id}")
+                        logger.info(f"Engine {self.engine_id} forced model to GPU {gpu_id}")
+                    
+                    # 验证模型是否在GPU上
+                    if hasattr(self.model, 'synthesizer') and hasattr(self.model.synthesizer, 'model'):
+                        for param in self.model.synthesizer.model.parameters():
+                            if param.device.type != 'cuda':
+                                logger.warning(f"Engine {self.engine_id} model parameter not on GPU: {param.device}")
+                                param.data = param.data.to(f"cuda:{gpu_id}")
+                    
+                    logger.info(f"Engine {self.engine_id} GPU verification completed")
+                except Exception as e:
+                    logger.error(f"Engine {self.engine_id} failed to force GPU usage: {e}")
 
 class TTSEngineManager:
     """TTS引擎管理器 - 使用生产者-消费者模式"""

@@ -95,11 +95,41 @@ def get_cpu_usage() -> Dict[str, float]:
     import psutil
     process = psutil.Process()
     
+    # 获取进程CPU使用率（不阻塞）
+    try:
+        process_percent = process.cpu_percent()
+    except:
+        process_percent = 0.0
+    
+    # 获取系统CPU使用率（不阻塞）
+    try:
+        system_percent = psutil.cpu_percent()
+    except:
+        system_percent = 0.0
+    
+    # 获取CPU核心数
+    try:
+        cpu_count = psutil.cpu_count()
+    except:
+        cpu_count = 0
+    
+    # 获取CPU频率 - 修复频率获取问题
+    cpu_freq = None
+    try:
+        freq_info = psutil.cpu_freq()
+        if freq_info and freq_info.current > 1000:  # 确保频率合理（>1GHz）
+            cpu_freq = freq_info.current
+        else:
+            # 如果频率不合理，尝试获取其他信息
+            cpu_freq = None
+    except:
+        cpu_freq = None
+    
     return {
-        "process_percent": process.cpu_percent(interval=0.1),  # 进程CPU使用率
-        "system_percent": psutil.cpu_percent(interval=0.1),  # 系统CPU使用率
-        "cpu_count": psutil.cpu_count(),  # CPU核心数
-        "cpu_freq": psutil.cpu_freq().current if psutil.cpu_freq() else None  # CPU频率
+        "process_percent": round(process_percent, 2),
+        "system_percent": round(system_percent, 2),
+        "cpu_count": cpu_count,
+        "cpu_freq": cpu_freq
     }
 
 def get_gpu_info() -> Dict[str, Any]:

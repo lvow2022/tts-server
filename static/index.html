@@ -26,9 +26,31 @@
         .gpu-stat { background: white; padding: 8px; border-radius: 3px; text-align: center; }
         .gpu-stat .value { font-size: 18px; font-weight: bold; color: #007bff; }
         .gpu-stat .label { font-size: 12px; color: #666; }
-        .system-info { background: #f0f9eb; padding: 10px; border-radius: 5px; margin-top: 20px; }
-        .system-info h4 { margin: 0 0 10px 0; color: #67c23a; }
-        .system-info p { margin: 5px 0; }
+        .system-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 10px 0;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .system-info h4 {
+            margin: 0 0 15px 0;
+            color: #495057;
+            font-size: 16px;
+        }
+        
+        .system-info p {
+            margin: 8px 0;
+            color: #6c757d;
+        }
+        
+        .system-info strong {
+            color: #495057;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -46,25 +68,33 @@
             <h3>📈 系统监控</h3>
             <div class="charts-grid">
                 <div class="chart-section">
-                    <h4>内存使用趋势</h4>
+                    <h4>GPU显存占用趋势</h4>
                     <div class="chart-container">
-                        <canvas id="memoryChart" class="chart"></canvas>
+                        <canvas id="gpuMemoryChart" class="chart"></canvas>
                     </div>
                 </div>
                 <div class="chart-section">
-                    <h4>GPU显存使用趋势</h4>
+                    <h4>GPU使用率趋势</h4>
                     <div class="chart-container">
-                        <canvas id="gpuChart" class="chart"></canvas>
+                        <canvas id="gpuUtilizationChart" class="chart"></canvas>
                     </div>
                 </div>
             </div>
             <div class="charts-grid">
+                <div class="chart-section">
+                    <h4>内存占用趋势</h4>
+                    <div class="chart-container">
+                        <canvas id="memoryChart" class="chart"></canvas>
+                    </div>
+                </div>
                 <div class="chart-section">
                     <h4>CPU使用率趋势</h4>
                     <div class="chart-container">
                         <canvas id="cpuChart" class="chart"></canvas>
                     </div>
                 </div>
+            </div>
+            <div class="charts-grid">
                 <div class="chart-section">
                     <h4>系统资源概览</h4>
                     <div id="systemInfo" class="system-info"></div>
@@ -89,72 +119,25 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         let healthCheckInterval = null;
-        let memoryHistory = []; // 存储内存使用历史
-        let gpuHistory = []; // 存储GPU显存使用历史
-        let cpuHistory = []; // 存储CPU使用率历史
         let memoryChart = null;
-        let gpuChart = null;
         let cpuChart = null;
+        let gpuMemoryChart = null;
+        let gpuUtilizationChart = null;
+        let memoryHistory = [];
+        let cpuHistory = [];
+        let gpuMemoryHistory = [];
+        let gpuUtilizationHistory = [];
         let isGPUAvailable = false;
         
-        // 初始化内存图表
-        function initMemoryChart() {
-            const ctx = document.getElementById('memoryChart').getContext('2d');
-            memoryChart = new Chart(ctx, {
+        // 初始化GPU显存图表
+        function initGPUMemoryChart() {
+            const ctx = document.getElementById('gpuMemoryChart').getContext('2d');
+            gpuMemoryChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: [],
                     datasets: [{
-                        label: '进程内存使用 (MB)',
-                        data: [],
-                        borderColor: 'rgb(75, 192, 192)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        tension: 0.1
-                    }, {
-                        label: '系统内存使用 (MB)',
-                        data: [],
-                        borderColor: 'rgb(255, 159, 64)',
-                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
-                        tension: 0.1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: '内存使用 (MB)'
-                            }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: '时间'
-                            }
-                        }
-                    },
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: '内存使用趋势图'
-                        }
-                    }
-                }
-            });
-        }
-        
-        // 初始化GPU图表
-        function initGPUChart() {
-            const ctx = document.getElementById('gpuChart').getContext('2d');
-            gpuChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'GPU显存使用 (MB)',
+                        label: 'GPU显存占用 (MB)',
                         data: [],
                         borderColor: 'rgb(255, 99, 132)',
                         backgroundColor: 'rgba(255, 99, 132, 0.2)',
@@ -169,7 +152,7 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'GPU显存使用 (MB)'
+                                text: '显存占用 (MB)'
                             }
                         },
                         x: {
@@ -182,7 +165,100 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'GPU显存使用趋势图'
+                            text: 'GPU显存占用趋势图'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 初始化GPU使用率图表
+        function initGPUUtilizationChart() {
+            const ctx = document.getElementById('gpuUtilizationChart').getContext('2d');
+            gpuUtilizationChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'GPU使用率 (%)',
+                        data: [],
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'GPU使用率 (%)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '时间'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'GPU使用率趋势图'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 初始化内存图表
+        function initMemoryChart() {
+            const ctx = document.getElementById('memoryChart').getContext('2d');
+            memoryChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '进程内存 (MB)',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1
+                    }, {
+                        label: '系统内存 (MB)',
+                        data: [],
+                        borderColor: 'rgb(255, 159, 64)',
+                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '内存占用 (MB)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '时间'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '内存占用趋势图'
                         }
                     }
                 }
@@ -197,12 +273,6 @@
                 data: {
                     labels: [],
                     datasets: [{
-                        label: '进程CPU使用率 (%)',
-                        data: [],
-                        borderColor: 'rgb(153, 102, 255)',
-                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
-                        tension: 0.1
-                    }, {
                         label: '系统CPU使用率 (%)',
                         data: [],
                         borderColor: 'rgb(255, 205, 86)',
@@ -232,11 +302,73 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'CPU使用率趋势图'
+                            text: '系统CPU使用率趋势图'
                         }
                     }
                 }
             });
+        }
+        
+        // 更新GPU显存图表
+        function updateGPUMemoryChart(gpuMemory, timestamp) {
+            if (!gpuMemoryChart) {
+                initGPUMemoryChart();
+            }
+            
+            // 如果GPU显存为null或undefined，跳过更新
+            if (gpuMemory === null || gpuMemory === undefined) {
+                return;
+            }
+            
+            // 添加新数据点
+            gpuMemoryHistory.push({
+                gpu_memory: gpuMemory,
+                timestamp: timestamp
+            });
+            
+            // 保持最近1000个数据点
+            if (gpuMemoryHistory.length > 1000) {
+                gpuMemoryHistory = gpuMemoryHistory.slice(-1000);
+            }
+            
+            // 更新图表数据
+            gpuMemoryChart.data.labels = gpuMemoryHistory.map(point => 
+                new Date(point.timestamp * 1000).toLocaleTimeString()
+            );
+            gpuMemoryChart.data.datasets[0].data = gpuMemoryHistory.map(point => point.gpu_memory);
+            
+            gpuMemoryChart.update();
+        }
+        
+        // 更新GPU使用率图表
+        function updateGPUUtilizationChart(gpuUtilization, timestamp) {
+            if (!gpuUtilizationChart) {
+                initGPUUtilizationChart();
+            }
+            
+            // 如果GPU使用率为null或undefined，跳过更新
+            if (gpuUtilization === null || gpuUtilization === undefined) {
+                return;
+            }
+            
+            // 添加新数据点
+            gpuUtilizationHistory.push({
+                gpu_utilization: gpuUtilization,
+                timestamp: timestamp
+            });
+            
+            // 保持最近1000个数据点
+            if (gpuUtilizationHistory.length > 1000) {
+                gpuUtilizationHistory = gpuUtilizationHistory.slice(-1000);
+            }
+            
+            // 更新图表数据
+            gpuUtilizationChart.data.labels = gpuUtilizationHistory.map(point => 
+                new Date(point.timestamp * 1000).toLocaleTimeString()
+            );
+            gpuUtilizationChart.data.datasets[0].data = gpuUtilizationHistory.map(point => point.gpu_utilization);
+            
+            gpuUtilizationChart.update();
         }
         
         // 更新内存图表
@@ -267,37 +399,6 @@
             memoryChart.update();
         }
         
-        // 更新GPU图表
-        function updateGPUChart(gpuUsage, timestamp) {
-            if (!gpuChart) {
-                initGPUChart();
-            }
-            
-            // 如果GPU使用量为null或undefined，跳过更新
-            if (gpuUsage === null || gpuUsage === undefined) {
-                return;
-            }
-            
-            // 添加新数据点
-            gpuHistory.push({
-                gpu: gpuUsage,
-                timestamp: timestamp
-            });
-            
-            // 保持最近1000个数据点
-            if (gpuHistory.length > 1000) {
-                gpuHistory = gpuHistory.slice(-1000);
-            }
-            
-            // 更新图表数据
-            gpuChart.data.labels = gpuHistory.map(point => 
-                new Date(point.timestamp * 1000).toLocaleTimeString()
-            );
-            gpuChart.data.datasets[0].data = gpuHistory.map(point => point.gpu);
-            
-            gpuChart.update();
-        }
-        
         // 更新CPU图表
         function updateCPUChart(cpuUsage, timestamp) {
             if (!cpuChart) {
@@ -306,7 +407,6 @@
             
             // 添加新数据点
             cpuHistory.push({
-                process_cpu: cpuUsage.process_percent || 0,
                 system_cpu: cpuUsage.system_percent || 0,
                 timestamp: timestamp
             });
@@ -320,8 +420,7 @@
             cpuChart.data.labels = cpuHistory.map(point => 
                 new Date(point.timestamp * 1000).toLocaleTimeString()
             );
-            cpuChart.data.datasets[0].data = cpuHistory.map(point => point.process_cpu);
-            cpuChart.data.datasets[1].data = cpuHistory.map(point => point.system_cpu);
+            cpuChart.data.datasets[0].data = cpuHistory.map(point => point.system_cpu);
             
             cpuChart.update();
         }
@@ -417,11 +516,11 @@
             if (cpuInfo) {
                 systemHTML += `
                     <p><strong>CPU:</strong> ${cpuInfo.cpu_count} 核心`;
-                if (cpuInfo.cpu_freq) {
-                    systemHTML += `, ${cpuInfo.cpu_freq.toFixed(1)} MHz`;
+                if (cpuInfo.cpu_freq && cpuInfo.cpu_freq > 1000) {
+                    systemHTML += `, ${(cpuInfo.cpu_freq / 1000).toFixed(1)} GHz`;
                 }
                 systemHTML += `</p>
-                    <p><strong>CPU使用率:</strong> 进程 ${cpuInfo.process_percent.toFixed(1)}%, 系统 ${cpuInfo.system_percent.toFixed(1)}%</p>
+                    <p><strong>系统CPU使用率:</strong> ${cpuInfo.system_percent.toFixed(1)}%</p>
                 `;
             }
             
@@ -438,6 +537,9 @@
                 if (gpuInfo.memory_used && gpuInfo.memory_total) {
                     const gpuUsagePercent = ((gpuInfo.memory_used / gpuInfo.memory_total) * 100).toFixed(1);
                     systemHTML += `<p><strong>GPU显存:</strong> ${gpuInfo.memory_used.toFixed(1)}MB / ${gpuInfo.memory_total.toFixed(1)}MB (${gpuUsagePercent}%)</p>`;
+                }
+                if (gpuInfo.utilization) {
+                    systemHTML += `<p><strong>GPU使用率:</strong> ${gpuInfo.utilization.toFixed(1)}%</p>`;
                 }
             }
             
@@ -504,7 +606,11 @@
                         
                         // 更新GPU显存使用图表
                         if (data.gpu_info.memory_used) {
-                            updateGPUChart(data.gpu_info.memory_used, data.timestamp);
+                            updateGPUMemoryChart(data.gpu_info.memory_used, data.timestamp);
+                        }
+                        // 更新GPU使用率图表
+                        if (data.gpu_info.utilization) {
+                            updateGPUUtilizationChart(data.gpu_info.utilization, data.timestamp);
                         }
                     } else {
                         isGPUAvailable = false;
