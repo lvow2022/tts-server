@@ -133,7 +133,8 @@ async def health_check():
             },
             "queue": status["queue"],
             "statistics": status["statistics"],
-            "memory_usage_mb": status["memory_usage"]["rss_mb"],
+            "memory_usage": status["memory_usage"],
+            "cpu_usage": status["cpu_usage"],
             "device": status["device"],
             "gpu_info": status["gpu_info"],
             "timestamp": time.time()

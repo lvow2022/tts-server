@@ -403,10 +403,11 @@ class TTSEngineManager:
     
     def get_status(self) -> Dict[str, Any]:
         """获取服务状态"""
-        from .utils import get_memory_usage, get_gpu_info
+        from .utils import get_memory_usage, get_gpu_info, get_cpu_usage
         
         memory_info = get_memory_usage()
         gpu_info = get_gpu_info()
+        cpu_info = get_cpu_usage()
         
         # 获取所有引擎的状态
         engine_statuses = []
@@ -437,6 +438,7 @@ class TTSEngineManager:
             "available_engines": available_engines,
             "busy_engines": busy_engines,
             "memory_usage": memory_info,
+            "cpu_usage": cpu_info,
             "device": get_device(),
             "model_name": settings.MODEL_NAME,
             "gpu_info": gpu_info,

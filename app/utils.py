@@ -77,10 +77,29 @@ def get_memory_usage() -> Dict[str, float]:
     process = psutil.Process()
     memory_info = process.memory_info()
     
+    # 获取系统总内存
+    system_memory = psutil.virtual_memory()
+    
     return {
         "rss_mb": memory_info.rss / 1024 / 1024,  # RSS内存（MB）
         "vms_mb": memory_info.vms / 1024 / 1024,  # VMS内存（MB）
-        "percent": process.memory_percent()  # 内存使用百分比
+        "percent": process.memory_percent(),  # 进程内存使用百分比
+        "system_total_mb": system_memory.total / 1024 / 1024,  # 系统总内存（MB）
+        "system_available_mb": system_memory.available / 1024 / 1024,  # 系统可用内存（MB）
+        "system_used_mb": system_memory.used / 1024 / 1024,  # 系统已用内存（MB）
+        "system_percent": system_memory.percent  # 系统内存使用百分比
+    }
+
+def get_cpu_usage() -> Dict[str, float]:
+    """获取CPU使用情况"""
+    import psutil
+    process = psutil.Process()
+    
+    return {
+        "process_percent": process.cpu_percent(interval=0.1),  # 进程CPU使用率
+        "system_percent": psutil.cpu_percent(interval=0.1),  # 系统CPU使用率
+        "cpu_count": psutil.cpu_count(),  # CPU核心数
+        "cpu_freq": psutil.cpu_freq().current if psutil.cpu_freq() else None  # CPU频率
     }
 
 def get_gpu_info() -> Dict[str, Any]:
@@ -99,6 +118,7 @@ def get_gpu_info() -> Dict[str, Any]:
                 "memory_total": None,  # MPS不提供内存信息
                 "memory_used": None,
                 "memory_free": None,
+                "memory_reserved": None,
                 "temperature": None,
                 "utilization": None,
                 "devices": [

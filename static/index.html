@@ -26,6 +26,9 @@
         .gpu-stat { background: white; padding: 8px; border-radius: 3px; text-align: center; }
         .gpu-stat .value { font-size: 18px; font-weight: bold; color: #007bff; }
         .gpu-stat .label { font-size: 12px; color: #666; }
+        .system-info { background: #f0f9eb; padding: 10px; border-radius: 5px; margin-top: 20px; }
+        .system-info h4 { margin: 0 0 10px 0; color: #67c23a; }
+        .system-info p { margin: 5px 0; }
     </style>
 </head>
 <body>
@@ -55,6 +58,18 @@
                     </div>
                 </div>
             </div>
+            <div class="charts-grid">
+                <div class="chart-section">
+                    <h4>CPU使用率趋势</h4>
+                    <div class="chart-container">
+                        <canvas id="cpuChart" class="chart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-section">
+                    <h4>系统资源概览</h4>
+                    <div id="systemInfo" class="system-info"></div>
+                </div>
+            </div>
             <div id="gpuInfo" class="gpu-info" style="display: none;">
                 <h4>🎮 GPU 信息</h4>
                 <div class="gpu-stats" id="gpuStats"></div>
@@ -76,8 +91,10 @@
         let healthCheckInterval = null;
         let memoryHistory = []; // 存储内存使用历史
         let gpuHistory = []; // 存储GPU显存使用历史
+        let cpuHistory = []; // 存储CPU使用率历史
         let memoryChart = null;
         let gpuChart = null;
+        let cpuChart = null;
         let isGPUAvailable = false;
         
         // 初始化内存图表
@@ -88,10 +105,16 @@
                 data: {
                     labels: [],
                     datasets: [{
-                        label: '内存使用 (MB)',
+                        label: '进程内存使用 (MB)',
                         data: [],
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1
+                    }, {
+                        label: '系统内存使用 (MB)',
+                        data: [],
+                        borderColor: 'rgb(255, 159, 64)',
+                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
                         tension: 0.1
                     }]
                 },
@@ -166,6 +189,56 @@
             });
         }
         
+        // 初始化CPU图表
+        function initCPUChart() {
+            const ctx = document.getElementById('cpuChart').getContext('2d');
+            cpuChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '进程CPU使用率 (%)',
+                        data: [],
+                        borderColor: 'rgb(153, 102, 255)',
+                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                        tension: 0.1
+                    }, {
+                        label: '系统CPU使用率 (%)',
+                        data: [],
+                        borderColor: 'rgb(255, 205, 86)',
+                        backgroundColor: 'rgba(255, 205, 86, 0.2)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'CPU使用率 (%)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '时间'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'CPU使用率趋势图'
+                        }
+                    }
+                }
+            });
+        }
+        
         // 更新内存图表
         function updateMemoryChart(memoryUsage, timestamp) {
             if (!memoryChart) {
@@ -174,7 +247,8 @@
             
             // 添加新数据点
             memoryHistory.push({
-                memory: memoryUsage,
+                process_memory: memoryUsage.rss_mb || memoryUsage,
+                system_memory: memoryUsage.system_used_mb || 0,
                 timestamp: timestamp
             });
             
@@ -187,7 +261,8 @@
             memoryChart.data.labels = memoryHistory.map(point => 
                 new Date(point.timestamp * 1000).toLocaleTimeString()
             );
-            memoryChart.data.datasets[0].data = memoryHistory.map(point => point.memory);
+            memoryChart.data.datasets[0].data = memoryHistory.map(point => point.process_memory);
+            memoryChart.data.datasets[1].data = memoryHistory.map(point => point.system_memory);
             
             memoryChart.update();
         }
@@ -221,6 +296,34 @@
             gpuChart.data.datasets[0].data = gpuHistory.map(point => point.gpu);
             
             gpuChart.update();
+        }
+        
+        // 更新CPU图表
+        function updateCPUChart(cpuUsage, timestamp) {
+            if (!cpuChart) {
+                initCPUChart();
+            }
+            
+            // 添加新数据点
+            cpuHistory.push({
+                process_cpu: cpuUsage.process_percent || 0,
+                system_cpu: cpuUsage.system_percent || 0,
+                timestamp: timestamp
+            });
+            
+            // 保持最近1000个数据点
+            if (cpuHistory.length > 1000) {
+                cpuHistory = cpuHistory.slice(-1000);
+            }
+            
+            // 更新图表数据
+            cpuChart.data.labels = cpuHistory.map(point => 
+                new Date(point.timestamp * 1000).toLocaleTimeString()
+            );
+            cpuChart.data.datasets[0].data = cpuHistory.map(point => point.process_cpu);
+            cpuChart.data.datasets[1].data = cpuHistory.map(point => point.system_cpu);
+            
+            cpuChart.update();
         }
         
         // 更新GPU信息显示
@@ -304,6 +407,43 @@
             gpuStatsDiv.innerHTML = statsHTML;
         }
         
+        // 更新系统信息显示
+        function updateSystemInfo(memoryInfo, cpuInfo, gpuInfo) {
+            const systemInfoDiv = document.getElementById('systemInfo');
+            
+            let systemHTML = '<h4>💻 系统资源</h4>';
+            
+            // CPU信息
+            if (cpuInfo) {
+                systemHTML += `
+                    <p><strong>CPU:</strong> ${cpuInfo.cpu_count} 核心`;
+                if (cpuInfo.cpu_freq) {
+                    systemHTML += `, ${cpuInfo.cpu_freq.toFixed(1)} MHz`;
+                }
+                systemHTML += `</p>
+                    <p><strong>CPU使用率:</strong> 进程 ${cpuInfo.process_percent.toFixed(1)}%, 系统 ${cpuInfo.system_percent.toFixed(1)}%</p>
+                `;
+            }
+            
+            // 内存信息
+            if (memoryInfo) {
+                systemHTML += `
+                    <p><strong>内存:</strong> 进程 ${memoryInfo.rss_mb.toFixed(1)}MB (${memoryInfo.percent.toFixed(1)}%), 系统 ${memoryInfo.system_used_mb.toFixed(1)}MB / ${memoryInfo.system_total_mb.toFixed(1)}MB (${memoryInfo.system_percent.toFixed(1)}%)</p>
+                `;
+            }
+            
+            // GPU信息
+            if (gpuInfo && gpuInfo.available) {
+                systemHTML += `<p><strong>GPU:</strong> ${gpuInfo.name} (${gpuInfo.device_type.toUpperCase()})</p>`;
+                if (gpuInfo.memory_used && gpuInfo.memory_total) {
+                    const gpuUsagePercent = ((gpuInfo.memory_used / gpuInfo.memory_total) * 100).toFixed(1);
+                    systemHTML += `<p><strong>GPU显存:</strong> ${gpuInfo.memory_used.toFixed(1)}MB / ${gpuInfo.memory_total.toFixed(1)}MB (${gpuUsagePercent}%)</p>`;
+                }
+            }
+            
+            systemInfoDiv.innerHTML = systemHTML;
+        }
+        
         async function checkHealth() {
             try {
                 const response = await fetch('/health');
@@ -347,7 +487,15 @@
                     statusDiv.innerHTML = statusHTML;
                     
                     // 更新内存使用图表
-                    updateMemoryChart(data.memory_usage_mb, data.timestamp);
+                    updateMemoryChart(data.memory_usage, data.timestamp);
+                    
+                    // 更新CPU使用率图表
+                    if (data.cpu_usage) {
+                        updateCPUChart(data.cpu_usage, data.timestamp);
+                    }
+                    
+                    // 更新系统信息
+                    updateSystemInfo(data.memory_usage, data.cpu_usage, data.gpu_info);
                     
                     // 更新GPU信息
                     if (data.gpu_info && data.gpu_info.available) {
