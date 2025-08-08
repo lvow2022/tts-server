@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     PORT: int = 8421 
     WORKERS: int = 4  # 减少worker数量以减少GPU竞争
     
-    # TTS模型配置 - 使用中文模型
-    MODEL_NAME: str = "tts_models/zh-CN/baker/tacotron2-DDC-GST"  # 中文 Tacotron2-GST 模型
+    # TTS模型配置 
+    # MODEL_NAME: str = "tts_models/zh-CN/baker/tacotron2-DDC-GST"  
+    MODEL_NAME: str = "tts_models/en/ljspeech/glow-tts"
     VOCODER_NAME: str = "vocoder_models/universal/hifigan_v2" 
     DEVICE: str = "auto"  # auto, cpu, cuda
     

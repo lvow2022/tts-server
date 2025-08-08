@@ -89,7 +89,7 @@ python run.py
 python stress_test.py
 
 # 自定义参数压测
-python stress_test.py --url http://localhost:8422 --concurrent 4 --total 20
+python stress_test.py --url http://localhost:8421 --concurrent 4 --total 20  --lang en
 ```
 
 ## 设备支持

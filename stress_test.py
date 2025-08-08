@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 import argparse
 
 class TTSStressTest:
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "http://localhost:8421"):
         self.base_url = base_url
         self.results = []
         
@@ -73,17 +73,7 @@ class TTSStressTest:
                 "error": str(e)
             }
     
-    async def health_check(self) -> bool:
-        """健康检查"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.base_url}/health") as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return data.get("status") == "healthy"
-                    return False
-        except Exception:
-            return False
+
     
     async def run_stress_test(self, 
                             concurrent_requests: int = 50,
@@ -93,14 +83,16 @@ class TTSStressTest:
         
         print(f"开始压测: {concurrent_requests} 并发, {total_requests} 总请求")
         
-        # 检查服务健康状态
-        if not await self.health_check():
-            print("❌ 服务不健康，停止压测")
-            return {"error": "Service unhealthy"}
-        
-        # 准备测试文本
+        # 准备测试文本 - 支持中英文
         if test_texts is None:
             test_texts = [
+                # 英文测试文本
+                "Hello, this is a test.",
+                "The weather is nice today.",
+                "Artificial intelligence technology is developing rapidly.",
+                "Text to speech technology is becoming more mature.",
+                "This is a high concurrency stress test.",
+                # 中文测试文本
                 "你好，这是一个测试。",
                 "今天天气很好。",
                 "人工智能技术发展迅速。",
@@ -216,6 +208,7 @@ class TTSStressTest:
         print(f"   总耗时: {summary['total_time']}")
         print(f"   QPS: {summary['qps']}")
         print(f"   并发数: {summary['concurrent_requests']}")
+        print(f"   测试语言: {args.lang if 'args' in locals() else 'both'}")
         
         print(f"\n⏱️  响应时间:")
         print(f"   平均: {response_times['average_ms']}ms")
@@ -235,10 +228,11 @@ class TTSStressTest:
 
 async def main():
     parser = argparse.ArgumentParser(description="TTS服务压测工具")
-    parser.add_argument("--url", default="http://localhost:8000", help="TTS服务地址")
+    parser.add_argument("--url", default="http://localhost:8421", help="TTS服务地址")
     parser.add_argument("--concurrent", type=int, default=50, help="并发请求数")
     parser.add_argument("--total", type=int, default=200, help="总请求数")
     parser.add_argument("--text", help="测试文本，用逗号分隔多个文本")
+    parser.add_argument("--lang", choices=["en", "zh", "both"], default="both", help="测试语言: en(英文), zh(中文), both(中英文)")
     
     args = parser.parse_args()
     
@@ -246,6 +240,24 @@ async def main():
     test_texts = None
     if args.text:
         test_texts = [text.strip() for text in args.text.split(",")]
+    elif args.lang != "both":
+        # 根据语言选择预设文本
+        if args.lang == "en":
+            test_texts = [
+                "Hello, this is a test.",
+                "The weather is nice today.",
+                "Artificial intelligence technology is developing rapidly.",
+                "Text to speech technology is becoming more mature.",
+                "This is a high concurrency stress test."
+            ]
+        elif args.lang == "zh":
+            test_texts = [
+                "你好，这是一个测试。",
+                "今天天气很好。",
+                "人工智能技术发展迅速。",
+                "语音合成技术越来越成熟。",
+                "这是一个高并发压测。"
+            ]
     
     # 创建压测实例
     stress_test = TTSStressTest(args.url)
