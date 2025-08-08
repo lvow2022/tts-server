@@ -25,51 +25,18 @@ class TTSEngine:
         self.audio_format = settings.AUDIO_FORMAT
         self.max_text_length = settings.MAX_TEXT_LENGTH
         
-        # 状态管理
-        self._busy = False
-        self._lock = threading.RLock()  # 可重入锁
-        self._current_task = None
-        self._start_time = None
-        
         # 在初始化时直接加载模型，而不是使用threading.local()
         self.model = self._load_model()
         
         logger.info(f"TTS Engine {engine_id} initialized on device: {self.device}")
     
-    @property
-    def busy(self) -> bool:
-        """获取引擎是否忙碌"""
-        with self._lock:
-            return self._busy
-    
-    @property
-    def available(self) -> bool:
-        """获取引擎是否可用"""
-        return not self.busy
-    
-    def _set_busy(self, busy: bool, task_info: str = None):
-        """设置引擎忙碌状态"""
-        with self._lock:
-            self._busy = busy
-            self._current_task = task_info if busy else None
-            self._start_time = time.time() if busy else None
-    
     def get_status(self) -> Dict[str, Any]:
         """获取引擎状态"""
-        with self._lock:
-            status = {
-                "engine_id": self.engine_id,
-                "busy": self._busy,
-                "available": not self._busy,
-                "current_task": self._current_task,
-                "device": self.device,
-                "model_loaded": self.model is not None
-            }
-            
-            if self._busy and self._start_time:
-                status["task_duration"] = time.time() - self._start_time
-            
-            return status
+        return {
+            "engine_id": self.engine_id,
+            "device": self.device,
+            "model_loaded": self.model is not None
+        }
     
     def _load_model(self):
         """加载TTS模型"""
@@ -103,15 +70,49 @@ class TTSEngine:
                 )
                 # 手动移动到 MPS 设备
                 model.to("mps")
+            elif self.device == "cuda":
+                # CUDA 设备需要特殊处理
+                import torch
+                # 确保CUDA可用
+                if not torch.cuda.is_available():
+                    logger.warning(f"CUDA not available for engine {self.engine_id}, falling back to CPU")
+                    model = TTS(
+                        model_name=settings.MODEL_NAME,
+                        progress_bar=False,
+                        gpu=False
+                    )
+                else:
+                    # 为每个worker分配不同的GPU（如果有多个GPU）
+                    gpu_id = self.engine_id % torch.cuda.device_count()
+                    torch.cuda.set_device(gpu_id)
+                    logger.info(f"Engine {self.engine_id} using GPU {gpu_id}: {torch.cuda.get_device_name(gpu_id)}")
+                    
+                    # 强制使用GPU
+                    model = TTS(
+                        model_name=settings.MODEL_NAME,
+                        progress_bar=False,
+                        gpu=True
+                    )
+                    
+                    # 确保模型在正确的GPU上
+                    model.to(f"cuda:{gpu_id}")
+                    
+                    # 验证模型是否在GPU上
+                    if hasattr(model, 'synthesizer') and hasattr(model.synthesizer, 'model'):
+                        device = next(model.synthesizer.model.parameters()).device
+                        logger.info(f"Engine {self.engine_id} model loaded on device: {device}")
+                    else:
+                        logger.warning(f"Engine {self.engine_id} model device verification failed")
             else:
+                # CPU 设备
                 model = TTS(
                     model_name=settings.MODEL_NAME,
                     progress_bar=False,
-                    gpu=(self.device == "cuda")
+                    gpu=False
                 )
             
             load_time = time.time() - start_time
-            logger.info(f"Engine {self.engine_id} model loaded successfully in {load_time:.2f}s")
+            logger.info(f"Engine {self.engine_id} model loaded successfully in {load_time:.2f}s on device: {self.device}")
             
             return model
             
@@ -120,22 +121,7 @@ class TTSEngine:
             raise e
     
     def synthesize(self, text: str, speaker: str = "default") -> Dict[str, Any]:
-        """合成语音 - 线程安全版本"""
-        # 使用原子操作检查和设置忙碌状态
-        with self._lock:
-            # 检查是否已经忙碌
-            if self._busy:
-                return format_response(
-                    success=False,
-                    error=f"Engine {self.engine_id} is busy with task: {self._current_task}"
-                )
-            
-            # 设置忙碌状态
-            task_info = f"synthesize: {text[:20]}{'...' if len(text) > 20 else ''}"
-            self._busy = True
-            self._current_task = task_info
-            self._start_time = time.time()
-        
+        """合成语音 - 简化版本，无状态管理"""
         try:
             # 验证输入
             if not validate_text(text, self.max_text_length):
@@ -147,11 +133,27 @@ class TTSEngine:
             # 直接使用已加载的模型进行推理
             start_time = time.time()
             
+            # 确保在正确的GPU上下文中执行推理
+            if self.device == "cuda":
+                import torch
+                if torch.cuda.is_available():
+                    # 设置正确的GPU设备
+                    gpu_id = self.engine_id % torch.cuda.device_count()
+                    torch.cuda.set_device(gpu_id)
+                    logger.debug(f"Engine {self.engine_id} using GPU {gpu_id} for inference")
+                    
+                    # 验证模型是否在正确的GPU上
+                    if hasattr(self.model, 'synthesizer') and hasattr(self.model.synthesizer, 'model'):
+                        device = next(self.model.synthesizer.model.parameters()).device
+                        logger.debug(f"Engine {self.engine_id} model is on device: {device}")
+                        if str(device) != f"cuda:{gpu_id}":
+                            logger.warning(f"Engine {self.engine_id} model is on wrong device: {device}, expected cuda:{gpu_id}")
+            
             # 执行TTS推理 - 对于单说话人模型，不传入 speaker 参数
             audio = self.model.tts(text)
             
             inference_time = time.time() - start_time
-            logger.info(f"Engine {self.engine_id} TTS inference completed in {inference_time:.3f}s")
+            logger.info(f"Engine {self.engine_id} TTS inference completed in {inference_time:.3f}s on {self.device}")
             
             # 转换为base64
             audio_base64 = audio_to_base64(audio, self.sample_rate, self.audio_format)
@@ -175,12 +177,6 @@ class TTSEngine:
                 success=False,
                 error=f"Synthesis failed: {str(e)}"
             )
-        finally:
-            # 无论成功还是失败，都要释放忙碌状态
-            with self._lock:
-                self._busy = False
-                self._current_task = None
-                self._start_time = None
     
     def get_model_info(self) -> Dict[str, Any]:
         """获取模型信息"""
@@ -192,17 +188,13 @@ class TTSEngine:
                 "sample_rate": self.sample_rate,
                 "audio_format": self.audio_format,
                 "max_text_length": self.max_text_length,
-                "model_loaded": True,
-                "busy": self.busy,
-                "available": self.available
+                "model_loaded": True
             }
         except Exception as e:
             return {
                 "engine_id": self.engine_id,
                 "model_loaded": False,
-                "error": str(e),
-                "busy": self.busy,
-                "available": self.available
+                "error": str(e)
             }
 
 class TTSEngineManager:
@@ -390,16 +382,10 @@ class TTSEngineManager:
         
         # 获取所有引擎的状态
         engine_statuses = []
-        available_engines = 0
-        busy_engines = 0
         
         for engine in self.engines:
             status = engine.get_status()
             engine_statuses.append(status)
-            if status["available"]:
-                available_engines += 1
-            else:
-                busy_engines += 1
         
         # 队列状态
         queue_size = self.request_queue.qsize()
@@ -412,8 +398,6 @@ class TTSEngineManager:
             "uptime": time.time() - self.start_time,
             "num_workers": len(self.engines),
             "total_workers": self.num_workers,
-            "available_engines": available_engines,
-            "busy_engines": busy_engines,
             "memory_usage": memory_info,
             "cpu_usage": cpu_info,
             "device": get_device(),

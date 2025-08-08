@@ -125,7 +125,6 @@ async def health_check():
         # 检查服务健康状态
         is_healthy = (
             status["num_workers"] > 0 and 
-            status["available_engines"] > 0 and
             status["queue"]["size"] < status["queue"]["max_size"]
         )
         
@@ -134,8 +133,8 @@ async def health_check():
             "uptime": time.time() - start_time,
             "workers": {
                 "total": status["total_workers"],
-                "available": status["available_engines"],
-                "busy": status["busy_engines"]
+                "available": status["num_workers"],
+                "busy": 0  # 在生产者-消费者模式下，所有worker都是可用的
             },
             "queue": status["queue"],
             "statistics": status["statistics"],
