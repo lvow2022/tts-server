@@ -293,22 +293,19 @@ class TTSEngineManager:
         
         for i in range(self.num_workers):
             try:
-                if settings.USE_KANTTS:
-                    # 使用KAN-TTS引擎
-                    from .kantts_engine import KANTTSEngine
-                    engine = KANTTSEngine(engine_id=i)
+                engine = TTSEngine(i)
+                # 模型已经在初始化时加载，这里只需要验证模型是否正常工作
+                test_result = engine.synthesize("你好世界，这是一个文本转语音的测试。", "default")
+                if test_result["success"]:
+                    self.engines.append(engine)
+                    logger.info(f"Worker {i} model loaded and tested successfully")
                 else:
-                    # 使用Coqui TTS引擎
-                    engine = TTSEngine(engine_id=i)
-                
-                self.engines.append(engine)
-                logger.info(f"Engine {i} loaded successfully")
-                
+                    logger.error(f"Worker {i} model test failed: {test_result.get('error')}")
+                    
             except Exception as e:
-                logger.error(f"Failed to load engine {i}: {e}")
-                raise e
+                logger.error(f"Failed to load model for worker {i}: {e}")
         
-        logger.info(f"All {len(self.engines)} engines loaded successfully")
+        logger.info(f"Successfully loaded {len(self.engines)} models")
     
     def _start_worker_threads(self):
         """启动worker线程"""
