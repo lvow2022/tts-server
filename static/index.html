@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TTS Server 测试页面</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        input, textarea, button { margin: 5px; padding: 8px; }
+        textarea { width: 100%; height: 100px; }
+        button { background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 3px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        .auto-check { font-size: 12px; color: #666; margin-top: 5px; }
+        .chart-container { margin: 20px 0; }
+        .chart { width: 100%; height: 300px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 TTS Server 测试页面</h1>
+        
+        <div class="section">
+            <h3>📊 服务状态</h3>
+            <button onclick="checkHealth()">检查健康状态</button>
+            <div id="healthStatus"></div>
+            <div class="auto-check">⏰ 每5秒自动检查服务状态</div>
+        </div>
+        
+        <div class="section">
+            <div class="chart-container">
+                <canvas id="memoryChart" class="chart"></canvas>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h3>🎵 语音合成测试</h3>
+            <textarea id="textInput" placeholder="请输入要合成的文本...">你好，这是一个测试。</textarea>
+            <br>
+            <button onclick="synthesize()">合成语音</button>
+            <div id="synthesisResult"></div>
+            <audio id="audioPlayer" controls style="display:none;"></audio>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let healthCheckInterval = null;
+        let memoryHistory = []; // 存储内存使用历史
+        let chart = null;
+        
+        // 初始化图表
+        function initChart() {
+            const ctx = document.getElementById('memoryChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: '内存使用 (MB)',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '内存使用 (MB)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '时间'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '内存使用趋势图'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 更新图表
+        function updateChart(memoryUsage, timestamp) {
+            if (!chart) {
+                initChart();
+            }
+            
+            // 添加新数据点
+            memoryHistory.push({
+                memory: memoryUsage,
+                timestamp: timestamp
+            });
+            
+            // 保持最近1000个数据点
+            if (memoryHistory.length > 1000) {
+                memoryHistory = memoryHistory.slice(-1000);
+            }
+            
+            // 更新图表数据
+            chart.data.labels = memoryHistory.map(point => 
+                new Date(point.timestamp * 1000).toLocaleTimeString()
+            );
+            chart.data.datasets[0].data = memoryHistory.map(point => point.memory);
+            
+            chart.update();
+        }
+        
+        async function checkHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                const statusDiv = document.getElementById('healthStatus');
+                
+                if (data.status === 'healthy') {
+                    statusDiv.innerHTML = `
+                        <div class="status success">
+                            ✅ 服务正常<br>
+                            运行时间: ${data.uptime.toFixed(1)}s<br>
+                            Worker数量: ${data.workers}<br>
+                            内存使用: ${data.memory_usage_mb.toFixed(1)}MB<br>
+                            设备: ${data.device}<br>
+                            最后检查: ${new Date().toLocaleTimeString()}
+                        </div>
+                    `;
+                    
+                    // 更新内存使用图表
+                    updateChart(data.memory_usage_mb, data.timestamp);
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="status error">
+                            ❌ 服务异常: ${data.error}<br>
+                            最后检查: ${new Date().toLocaleTimeString()}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('healthStatus').innerHTML = `
+                    <div class="status error">
+                        ❌ 请求失败: ${error}<br>
+                        最后检查: ${new Date().toLocaleTimeString()}
+                    </div>
+                `;
+            }
+        }
+        
+        async function synthesize() {
+            const text = document.getElementById('textInput').value;
+            if (!text.trim()) {
+                alert('请输入文本');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/synthesize', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text: text, speaker: 'default'})
+                });
+                
+                const data = await response.json();
+                const resultDiv = document.getElementById('synthesisResult');
+                
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <div class="status success">
+                            ✅ 合成成功<br>
+                            推理时间: ${(data.data.inference_time * 1000).toFixed(1)}ms<br>
+                            音频长度: ${data.data.audio.length} 字符
+                        </div>
+                    `;
+                    
+                    // 播放音频
+                    const audio = document.getElementById('audioPlayer');
+                    audio.src = 'data:audio/wav;base64,' + data.data.audio;
+                    audio.style.display = 'block';
+                } else {
+                    resultDiv.innerHTML = `<div class="status error">❌ 合成失败: ${data.error}</div>`;
+                }
+            } catch (error) {
+                document.getElementById('synthesisResult').innerHTML = `<div class="status error">❌ 请求失败: ${error}</div>`;
+            }
+        }
+        
+        function startAutoHealthCheck() {
+            // 清除之前的定时器
+            if (healthCheckInterval) {
+                clearInterval(healthCheckInterval);
+            }
+            
+            // 立即执行一次健康检查
+            checkHealth();
+            
+            // 每5秒自动检查一次
+            healthCheckInterval = setInterval(checkHealth, 5000);
+        }
+        
+        function stopAutoHealthCheck() {
+            if (healthCheckInterval) {
+                clearInterval(healthCheckInterval);
+                healthCheckInterval = null;
+            }
+        }
+        
+        // 页面加载时启动自动健康检查
+        window.onload = function() {
+            startAutoHealthCheck();
+        };
+        
+        // 页面卸载时清除定时器
+        window.onbeforeunload = function() {
+            stopAutoHealthCheck();
+        };
+    </script>
+</body>
+</html> 
