@@ -13,10 +13,15 @@ class Settings(BaseSettings):
     PORT: int = 8421 
     WORKERS: int = 4  # 减少worker数量以减少GPU竞争
     
-    # TTS模型配置 - 使用中文模型
+    # TTS模型配置
     MODEL_NAME: str = "tts_models/zh-CN/baker/tacotron2-DDC-GST"  # 中文 Tacotron2-GST 模型
     VOCODER_NAME: str = "vocoder_models/universal/hifigan_v2" 
     DEVICE: str = "auto"  # auto, cpu, cuda
+    
+    # KAN-TTS配置
+    USE_KANTTS: bool = False  # 是否使用KAN-TTS
+    KANTTS_MODEL_PATH: str = "models/kantts/zhcn"  # KAN-TTS模型路径
+    KANTTS_LANGUAGE: str = "zhcn"  # 语言代码
     
     # 音频配置
     SAMPLE_RATE: int = 22050
