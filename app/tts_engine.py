@@ -15,62 +15,63 @@ class TTSEngine:
     """TTS推理引擎 - 每个worker独立加载模型"""
     
     def __init__(self):
-        self._local = threading.local()
         self.device = get_device()
         self.sample_rate = settings.SAMPLE_RATE
         self.audio_format = settings.AUDIO_FORMAT
         self.max_text_length = settings.MAX_TEXT_LENGTH
         
+        # 在初始化时直接加载模型，而不是使用threading.local()
+        self.model = self._load_model()
+        
         logger.info(f"TTS Engine initialized on device: {self.device}")
     
-    def _get_model(self):
-        """获取当前线程的模型实例"""
-        if not hasattr(self._local, 'model'):
-            try:
-                logger.info(f"Loading TTS model for thread {threading.current_thread().name}")
-                logger.info(f"Model path: {settings.MODEL_NAME}")
-                start_time = time.time()
-                
-                # 修复 PyTorch 2.6 兼容性问题
-                import torch.serialization
-                from TTS.utils.radam import RAdam
-                import collections
-                torch.serialization.add_safe_globals([
-                    RAdam,
-                    collections.defaultdict,
-                    collections.OrderedDict,
-                    collections.Counter,
-                    dict,
-                    list,
-                    tuple,
-                    set
-                ])
-                
-                # 加载模型 - 适配 TTS 0.22.0 版本
-                if self.device == "mps":
-                    # MPS 设备需要特殊处理
-                    self._local.model = TTS(
-                        model_name=settings.MODEL_NAME,
-                        progress_bar=False,
-                        gpu=False  # MPS 设备不使用 gpu 参数
-                    )
-                    # 手动移动到 MPS 设备
-                    self._local.model.to("mps")
-                else:
-                    self._local.model = TTS(
-                        model_name=settings.MODEL_NAME,
-                        progress_bar=False,
-                        gpu=(self.device == "cuda")
-                    )
-                
-                load_time = time.time() - start_time
-                logger.info(f"Model loaded successfully in {load_time:.2f}s")
-                
-            except Exception as e:
-                logger.error(f"Failed to load model: {e}")
-                raise e
-        
-        return self._local.model
+    def _load_model(self):
+        """加载TTS模型"""
+        try:
+            logger.info(f"Loading TTS model for thread {threading.current_thread().name}")
+            logger.info(f"Model path: {settings.MODEL_NAME}")
+            start_time = time.time()
+            
+            # 修复 PyTorch 2.6 兼容性问题
+            import torch.serialization
+            from TTS.utils.radam import RAdam
+            import collections
+            torch.serialization.add_safe_globals([
+                RAdam,
+                collections.defaultdict,
+                collections.OrderedDict,
+                collections.Counter,
+                dict,
+                list,
+                tuple,
+                set
+            ])
+            
+            # 加载模型 - 适配 TTS 0.22.0 版本
+            if self.device == "mps":
+                # MPS 设备需要特殊处理
+                model = TTS(
+                    model_name=settings.MODEL_NAME,
+                    progress_bar=False,
+                    gpu=False  # MPS 设备不使用 gpu 参数
+                )
+                # 手动移动到 MPS 设备
+                model.to("mps")
+            else:
+                model = TTS(
+                    model_name=settings.MODEL_NAME,
+                    progress_bar=False,
+                    gpu=(self.device == "cuda")
+                )
+            
+            load_time = time.time() - start_time
+            logger.info(f"Model loaded successfully in {load_time:.2f}s")
+            
+            return model
+            
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+            raise e
     
     def synthesize(self, text: str, speaker: str = "default") -> Dict[str, Any]:
         """合成语音"""
@@ -82,12 +83,11 @@ class TTSEngine:
                     error=f"Invalid text: length must be <= {self.max_text_length}"
                 )
             
-            # 获取模型并推理
-            model = self._get_model()
+            # 直接使用已加载的模型进行推理
             start_time = time.time()
             
             # 执行TTS推理 - 对于单说话人模型，不传入 speaker 参数
-            audio = model.tts(text)
+            audio = self.model.tts(text)
             
             inference_time = time.time() - start_time
             logger.info(f"TTS inference completed in {inference_time:.3f}s")
@@ -117,8 +117,6 @@ class TTSEngine:
     def get_model_info(self) -> Dict[str, Any]:
         """获取模型信息"""
         try:
-            model = self._get_model()
-            
             return {
                 "model_name": settings.MODEL_NAME,
                 "device": self.device,
@@ -154,11 +152,11 @@ class TTSEngineManager:
         for i in range(self.num_workers):
             try:
                 engine = TTSEngine()
-                # 预热模型
+                # 模型已经在初始化时加载，这里只需要验证模型是否正常工作
                 test_result = engine.synthesize("你好世界，这是一个文本转语音的测试。", "default")
                 if test_result["success"]:
                     self.engines.append(engine)
-                    logger.info(f"Worker {i} model loaded successfully")
+                    logger.info(f"Worker {i} model loaded and tested successfully")
                 else:
                     logger.error(f"Worker {i} model test failed: {test_result.get('error')}")
                     

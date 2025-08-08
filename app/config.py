@@ -10,12 +10,12 @@ class Settings(BaseSettings):
     
     # 服务配置
     HOST: str = "0.0.0.0"
-    PORT: int = 8422  # 修改端口避免冲突
-    WORKERS: int = 8  # 增加 worker 数量，充分利用 M3 Pro 性能
+    PORT: int = 8421 
+    WORKERS: int = 8  
     
     # TTS模型配置 - 使用中文模型
     MODEL_NAME: str = "tts_models/zh-CN/baker/tacotron2-DDC-GST"  # 中文 Tacotron2-GST 模型
-    VOCODER_NAME: str = "vocoder_models/universal/hifigan_v2"  # HiFiGAN声码器
+    VOCODER_NAME: str = "vocoder_models/universal/hifigan_v2" 
     DEVICE: str = "auto"  # auto, cpu, cuda
     
     # 音频配置
