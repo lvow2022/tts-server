@@ -90,14 +90,21 @@ def get_gpu_info() -> Dict[str, Any]:
         
         # 检查 MPS (Apple Silicon GPU)
         if torch.backends.mps.is_available():
+            # 对于MPS，我们只能获取基本信息
             return {
                 "available": True,
                 "device_type": "mps",
                 "device_count": 1,
+                "name": "Apple Silicon GPU",
+                "memory_total": None,  # MPS不提供内存信息
+                "memory_used": None,
+                "memory_free": None,
+                "temperature": None,
+                "utilization": None,
                 "devices": [
                     {
                         "id": 0,
-                        "name": "Apple M3 Pro GPU",
+                        "name": "Apple Silicon GPU",
                         "device_type": "mps",
                         "memory_info": "MPS memory info not available",
                         "message": "Using Apple Silicon GPU acceleration"
@@ -107,7 +114,6 @@ def get_gpu_info() -> Dict[str, Any]:
         
         # 检查 CUDA
         if torch.cuda.is_available():
-            gpu_info = {}
             gpu_count = torch.cuda.device_count()
             
             if gpu_count == 0:
@@ -116,28 +122,61 @@ def get_gpu_info() -> Dict[str, Any]:
                     "message": "No GPU devices found"
                 }
             
-            gpu_info["available"] = True
-            gpu_info["device_type"] = "cuda"
-            gpu_info["device_count"] = gpu_count
-            gpu_info["devices"] = []
+            # 获取当前设备
+            current_device = torch.cuda.current_device()
+            gpu_name = torch.cuda.get_device_name(current_device)
             
+            # 获取GPU内存信息
+            memory_allocated = torch.cuda.memory_allocated(current_device) / 1024 / 1024  # MB
+            memory_reserved = torch.cuda.memory_reserved(current_device) / 1024 / 1024    # MB
+            memory_total = torch.cuda.get_device_properties(current_device).total_memory / 1024 / 1024  # MB
+            memory_free = memory_total - memory_allocated
+            
+            # 尝试获取GPU利用率（需要nvidia-ml-py）
+            utilization = None
+            temperature = None
+            try:
+                import pynvml
+                pynvml.nvmlInit()
+                handle = pynvml.nvmlDeviceGetHandleByIndex(current_device)
+                utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+            except ImportError:
+                # pynvml不可用，跳过
+                pass
+            except Exception:
+                # 其他错误，跳过
+                pass
+            
+            gpu_info = {
+                "available": True,
+                "device_type": "cuda",
+                "device_count": gpu_count,
+                "name": gpu_name,
+                "memory_total": round(memory_total, 2),
+                "memory_used": round(memory_allocated, 2),
+                "memory_free": round(memory_free, 2),
+                "memory_reserved": round(memory_reserved, 2),
+                "temperature": temperature,
+                "utilization": utilization,
+                "devices": []
+            }
+            
+            # 添加所有设备信息
             for i in range(gpu_count):
-                # 获取GPU名称
-                gpu_name = torch.cuda.get_device_name(i)
-                
-                # 获取GPU内存信息
-                memory_allocated = torch.cuda.memory_allocated(i) / 1024 / 1024  # MB
-                memory_reserved = torch.cuda.memory_reserved(i) / 1024 / 1024    # MB
-                memory_total = torch.cuda.get_device_properties(i).total_memory / 1024 / 1024  # MB
+                device_name = torch.cuda.get_device_name(i)
+                device_memory_allocated = torch.cuda.memory_allocated(i) / 1024 / 1024
+                device_memory_reserved = torch.cuda.memory_reserved(i) / 1024 / 1024
+                device_memory_total = torch.cuda.get_device_properties(i).total_memory / 1024 / 1024
                 
                 device_info = {
                     "id": i,
-                    "name": gpu_name,
+                    "name": device_name,
                     "device_type": "cuda",
-                    "memory_allocated_mb": round(memory_allocated, 2),
-                    "memory_reserved_mb": round(memory_reserved, 2),
-                    "memory_total_mb": round(memory_total, 2),
-                    "memory_usage_percent": round((memory_allocated / memory_total) * 100, 2) if memory_total > 0 else 0
+                    "memory_allocated_mb": round(device_memory_allocated, 2),
+                    "memory_reserved_mb": round(device_memory_reserved, 2),
+                    "memory_total_mb": round(device_memory_total, 2),
+                    "memory_usage_percent": round((device_memory_allocated / device_memory_total) * 100, 2) if device_memory_total > 0 else 0
                 }
                 
                 gpu_info["devices"].append(device_info)

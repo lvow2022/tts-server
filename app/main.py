@@ -31,6 +31,7 @@ start_time = None
 class SynthesisRequest(BaseModel):
     text: str
     speaker: str = "default"
+    timeout: float = 30.0  # 请求超时时间
 
 class SynthesisResponse(BaseModel):
     success: bool
@@ -71,15 +72,22 @@ async def root():
 
 @app.post("/synthesize", response_model=SynthesisResponse)
 async def synthesize(request: SynthesisRequest):
-    """语音合成接口"""
+    """语音合成接口 - 支持智能分配和排队"""
     try:
         loop = asyncio.get_event_loop()
+        
+        # 使用新的智能分配策略
         result = await loop.run_in_executor(
             executor,
             tts_manager.synthesize,
             request.text,
-            request.speaker
+            request.speaker,
+            request.timeout
         )
+        
+        # 添加时间戳
+        result["timestamp"] = time.time()
+        
         return SynthesisResponse(**result)
         
     except Exception as e:
@@ -92,7 +100,7 @@ async def synthesize(request: SynthesisRequest):
 
 @app.get("/health")
 async def health_check():
-    """健康检查接口"""
+    """健康检查接口 - 包含详细状态信息"""
     try:
         if tts_manager is None:
             return JSONResponse(
@@ -108,11 +116,23 @@ async def health_check():
                 content={"status": "unhealthy", "error": "No TTS workers available", "timestamp": time.time()}
             )
         
+        # 检查服务健康状态
+        is_healthy = (
+            status["num_workers"] > 0 and 
+            status["available_engines"] > 0 and
+            status["queue"]["size"] < status["queue"]["max_size"]
+        )
+        
         return {
-            "status": "healthy",
+            "status": "healthy" if is_healthy else "degraded",
             "uptime": time.time() - start_time,
-            "workers": status["num_workers"],
-            "total_workers": status["total_workers"],
+            "workers": {
+                "total": status["total_workers"],
+                "available": status["available_engines"],
+                "busy": status["busy_engines"]
+            },
+            "queue": status["queue"],
+            "statistics": status["statistics"],
             "memory_usage_mb": status["memory_usage"]["rss_mb"],
             "device": status["device"],
             "gpu_info": status["gpu_info"],
@@ -124,6 +144,57 @@ async def health_check():
         return JSONResponse(
             status_code=503,
             content={"status": "unhealthy", "error": str(e), "timestamp": time.time()}
+        )
+
+@app.get("/status")
+async def get_detailed_status():
+    """获取详细状态信息"""
+    try:
+        if tts_manager is None:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TTS manager not initialized", "timestamp": time.time()}
+            )
+        
+        status = tts_manager.get_status()
+        status["timestamp"] = time.time()
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Status check failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "timestamp": time.time()}
+        )
+
+@app.get("/engines")
+async def get_engine_status():
+    """获取所有引擎的详细状态"""
+    try:
+        if tts_manager is None:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "TTS manager not initialized", "timestamp": time.time()}
+            )
+        
+        status = tts_manager.get_status()
+        
+        return {
+            "engines": status["engine_statuses"],
+            "summary": {
+                "total": status["total_workers"],
+                "available": status["available_engines"],
+                "busy": status["busy_engines"]
+            },
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Engine status check failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "timestamp": time.time()}
         )
 
 if __name__ == "__main__":

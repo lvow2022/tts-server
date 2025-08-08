@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 1000px; margin: 0 auto; }
+        .container { max-width: 1200px; margin: 0 auto; }
         .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
         input, textarea, button { margin: 5px; padding: 8px; }
         textarea { width: 100%; height: 100px; }
@@ -18,6 +18,14 @@
         .auto-check { font-size: 12px; color: #666; margin-top: 5px; }
         .chart-container { margin: 20px 0; }
         .chart { width: 100%; height: 300px; border: 1px solid #ddd; }
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .chart-section { margin: 20px 0; }
+        .gpu-info { background: #e7f3ff; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .gpu-info h4 { margin: 0 0 10px 0; color: #0056b3; }
+        .gpu-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .gpu-stat { background: white; padding: 8px; border-radius: 3px; text-align: center; }
+        .gpu-stat .value { font-size: 18px; font-weight: bold; color: #007bff; }
+        .gpu-stat .label { font-size: 12px; color: #666; }
     </style>
 </head>
 <body>
@@ -32,8 +40,24 @@
         </div>
         
         <div class="section">
-            <div class="chart-container">
-                <canvas id="memoryChart" class="chart"></canvas>
+            <h3>📈 系统监控</h3>
+            <div class="charts-grid">
+                <div class="chart-section">
+                    <h4>内存使用趋势</h4>
+                    <div class="chart-container">
+                        <canvas id="memoryChart" class="chart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-section">
+                    <h4>GPU显存使用趋势</h4>
+                    <div class="chart-container">
+                        <canvas id="gpuChart" class="chart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div id="gpuInfo" class="gpu-info" style="display: none;">
+                <h4>🎮 GPU 信息</h4>
+                <div class="gpu-stats" id="gpuStats"></div>
             </div>
         </div>
         
@@ -51,12 +75,15 @@
     <script>
         let healthCheckInterval = null;
         let memoryHistory = []; // 存储内存使用历史
-        let chart = null;
+        let gpuHistory = []; // 存储GPU显存使用历史
+        let memoryChart = null;
+        let gpuChart = null;
+        let isGPUAvailable = false;
         
-        // 初始化图表
-        function initChart() {
+        // 初始化内存图表
+        function initMemoryChart() {
             const ctx = document.getElementById('memoryChart').getContext('2d');
-            chart = new Chart(ctx, {
+            memoryChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: [],
@@ -96,10 +123,53 @@
             });
         }
         
-        // 更新图表
-        function updateChart(memoryUsage, timestamp) {
-            if (!chart) {
-                initChart();
+        // 初始化GPU图表
+        function initGPUChart() {
+            const ctx = document.getElementById('gpuChart').getContext('2d');
+            gpuChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'GPU显存使用 (MB)',
+                        data: [],
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'GPU显存使用 (MB)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: '时间'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'GPU显存使用趋势图'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 更新内存图表
+        function updateMemoryChart(memoryUsage, timestamp) {
+            if (!memoryChart) {
+                initMemoryChart();
             }
             
             // 添加新数据点
@@ -114,12 +184,124 @@
             }
             
             // 更新图表数据
-            chart.data.labels = memoryHistory.map(point => 
+            memoryChart.data.labels = memoryHistory.map(point => 
                 new Date(point.timestamp * 1000).toLocaleTimeString()
             );
-            chart.data.datasets[0].data = memoryHistory.map(point => point.memory);
+            memoryChart.data.datasets[0].data = memoryHistory.map(point => point.memory);
             
-            chart.update();
+            memoryChart.update();
+        }
+        
+        // 更新GPU图表
+        function updateGPUChart(gpuUsage, timestamp) {
+            if (!gpuChart) {
+                initGPUChart();
+            }
+            
+            // 如果GPU使用量为null或undefined，跳过更新
+            if (gpuUsage === null || gpuUsage === undefined) {
+                return;
+            }
+            
+            // 添加新数据点
+            gpuHistory.push({
+                gpu: gpuUsage,
+                timestamp: timestamp
+            });
+            
+            // 保持最近1000个数据点
+            if (gpuHistory.length > 1000) {
+                gpuHistory = gpuHistory.slice(-1000);
+            }
+            
+            // 更新图表数据
+            gpuChart.data.labels = gpuHistory.map(point => 
+                new Date(point.timestamp * 1000).toLocaleTimeString()
+            );
+            gpuChart.data.datasets[0].data = gpuHistory.map(point => point.gpu);
+            
+            gpuChart.update();
+        }
+        
+        // 更新GPU信息显示
+        function updateGPUInfo(gpuInfo) {
+            const gpuInfoDiv = document.getElementById('gpuInfo');
+            const gpuStatsDiv = document.getElementById('gpuStats');
+            
+            if (!gpuInfo || !gpuInfo.available) {
+                gpuInfoDiv.style.display = 'none';
+                return;
+            }
+            
+            gpuInfoDiv.style.display = 'block';
+            
+            let statsHTML = '';
+            
+            if (gpuInfo.name) {
+                statsHTML += `
+                    <div class="gpu-stat">
+                        <div class="value">${gpuInfo.name}</div>
+                        <div class="label">GPU名称</div>
+                    </div>
+                `;
+            }
+            
+            if (gpuInfo.memory_total) {
+                statsHTML += `
+                    <div class="gpu-stat">
+                        <div class="value">${(gpuInfo.memory_total / 1024).toFixed(1)}GB</div>
+                        <div class="label">总显存</div>
+                    </div>
+                `;
+            }
+            
+            if (gpuInfo.memory_used) {
+                statsHTML += `
+                    <div class="gpu-stat">
+                        <div class="value">${(gpuInfo.memory_used / 1024).toFixed(1)}GB</div>
+                        <div class="label">已用显存</div>
+                    </div>
+                `;
+            }
+            
+            if (gpuInfo.memory_free) {
+                statsHTML += `
+                    <div class="gpu-stat">
+                        <div class="value">${(gpuInfo.memory_free / 1024).toFixed(1)}GB</div>
+                        <div class="label">可用显存</div>
+                    </div>
+                `;
+            }
+            
+            if (gpuInfo.memory_used && gpuInfo.memory_total) {
+                const usagePercent = ((gpuInfo.memory_used / gpuInfo.memory_total) * 100).toFixed(1);
+                statsHTML += `
+                    <div class="gpu-stat">
+                        <div class="value">${usagePercent}%</div>
+                        <div class="label">显存使用率</div>
+                    </div>
+                `;
+            }
+            
+            if (gpuInfo.temperature) {
+                statsHTML += `
+                    <div class="gpu-stat">
+                        <div class="value">${gpuInfo.temperature}°C</div>
+                        <div class="label">温度</div>
+                    </div>
+                `;
+            }
+            
+            if (gpuInfo.utilization) {
+                statsHTML += `
+                    <div class="gpu-stat">
+                        <div class="value">${gpuInfo.utilization}%</div>
+                        <div class="label">利用率</div>
+                    </div>
+                `;
+            }
+            
+            gpuStatsDiv.innerHTML = statsHTML;
         }
         
         async function checkHealth() {
@@ -128,20 +310,58 @@
                 const data = await response.json();
                 const statusDiv = document.getElementById('healthStatus');
                 
-                if (data.status === 'healthy') {
-                    statusDiv.innerHTML = `
-                        <div class="status success">
-                            ✅ 服务正常<br>
+                if (data.status === 'healthy' || data.status === 'degraded') {
+                    let statusClass = data.status === 'healthy' ? 'success' : 'info';
+                    let statusIcon = data.status === 'healthy' ? '✅' : '⚠️';
+                    
+                    let statusHTML = `
+                        <div class="status ${statusClass}">
+                            ${statusIcon} 服务${data.status === 'healthy' ? '正常' : '降级'}<br>
                             运行时间: ${data.uptime.toFixed(1)}s<br>
-                            Worker数量: ${data.workers}<br>
+                            Worker数量: ${data.workers.total} (可用: ${data.workers.available}, 忙碌: ${data.workers.busy})<br>
                             内存使用: ${data.memory_usage_mb.toFixed(1)}MB<br>
                             设备: ${data.device}<br>
+                    `;
+                    
+                    // 添加队列信息
+                    if (data.queue) {
+                        statusHTML += `
+                            队列状态: ${data.queue.size}/${data.queue.max_size}<br>
+                        `;
+                    }
+                    
+                    // 添加统计信息
+                    if (data.statistics) {
+                        statusHTML += `
+                            总请求: ${data.statistics.total_requests}, 
+                            成功: ${data.statistics.successful_requests}, 
+                            失败: ${data.statistics.failed_requests}<br>
+                        `;
+                    }
+                    
+                    statusHTML += `
                             最后检查: ${new Date().toLocaleTimeString()}
                         </div>
                     `;
                     
+                    statusDiv.innerHTML = statusHTML;
+                    
                     // 更新内存使用图表
-                    updateChart(data.memory_usage_mb, data.timestamp);
+                    updateMemoryChart(data.memory_usage_mb, data.timestamp);
+                    
+                    // 更新GPU信息
+                    if (data.gpu_info && data.gpu_info.available) {
+                        isGPUAvailable = true;
+                        updateGPUInfo(data.gpu_info);
+                        
+                        // 更新GPU显存使用图表
+                        if (data.gpu_info.memory_used) {
+                            updateGPUChart(data.gpu_info.memory_used, data.timestamp);
+                        }
+                    } else {
+                        isGPUAvailable = false;
+                        document.getElementById('gpuInfo').style.display = 'none';
+                    }
                 } else {
                     statusDiv.innerHTML = `
                         <div class="status error">
@@ -178,13 +398,20 @@
                 const resultDiv = document.getElementById('synthesisResult');
                 
                 if (data.success) {
-                    resultDiv.innerHTML = `
+                    let resultHTML = `
                         <div class="status success">
                             ✅ 合成成功<br>
                             推理时间: ${(data.data.inference_time * 1000).toFixed(1)}ms<br>
                             音频长度: ${data.data.audio.length} 字符
-                        </div>
                     `;
+                    
+                    // 添加引擎ID信息
+                    if (data.data.engine_id !== undefined) {
+                        resultHTML += `<br>使用引擎: ${data.data.engine_id}`;
+                    }
+                    
+                    resultHTML += `</div>`;
+                    resultDiv.innerHTML = resultHTML;
                     
                     // 播放音频
                     const audio = document.getElementById('audioPlayer');
