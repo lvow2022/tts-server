@@ -459,7 +459,7 @@
                             ${statusIcon} 服务${data.status === 'healthy' ? '正常' : '降级'}<br>
                             运行时间: ${data.uptime.toFixed(1)}s<br>
                             Worker数量: ${data.workers.total} (可用: ${data.workers.available}, 忙碌: ${data.workers.busy})<br>
-                            内存使用: ${data.memory_usage_mb.toFixed(1)}MB<br>
+                            内存使用: ${data.memory_usage.rss_mb.toFixed(1)}MB<br>
                             设备: ${data.device}<br>
                     `;
                     
