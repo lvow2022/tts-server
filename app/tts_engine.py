@@ -91,6 +91,12 @@ class TTSEngine:
                     torch.cuda.set_device(gpu_id)
                     logger.info(f"Engine {self.engine_id} using GPU {gpu_id}: {torch.cuda.get_device_name(gpu_id)}")
                     
+                    # 应用GPU优化配置
+                    if settings.GPU_OPTIMIZATION:
+                        # 设置GPU内存使用限制
+                        torch.cuda.set_per_process_memory_fraction(settings.GPU_MEMORY_FRACTION, gpu_id)
+                        logger.info(f"Engine {self.engine_id} GPU memory fraction set to {settings.GPU_MEMORY_FRACTION}")
+                    
                     # 记录加载前的显存
                     memory_before = torch.cuda.memory_allocated(gpu_id) / 1024 / 1024  # MB
                     
@@ -104,31 +110,14 @@ class TTSEngine:
                     # 确保模型在正确的GPU上
                     model.to(f"cuda:{gpu_id}")
                     
+                    # 优化GPU内存分配
+                    torch.cuda.empty_cache()
+                    
                     # 记录加载后的显存
                     memory_after = torch.cuda.memory_allocated(gpu_id) / 1024 / 1024  # MB
                     memory_used = memory_after - memory_before
                     
-                    # 验证模型是否在GPU上
-                    if hasattr(model, 'synthesizer') and hasattr(model.synthesizer, 'model'):
-                        device = next(model.synthesizer.model.parameters()).device
-                        logger.info(f"Engine {self.engine_id} model loaded on device: {device}")
-                        logger.info(f"Engine {self.engine_id} GPU memory usage: {memory_used:.2f} MB")
-                    elif hasattr(model, 'model'):
-                        # 尝试其他可能的模型属性
-                        device = next(model.model.parameters()).device
-                        logger.info(f"Engine {self.engine_id} model loaded on device: {device}")
-                        logger.info(f"Engine {self.engine_id} GPU memory usage: {memory_used:.2f} MB")
-                    else:
-                        logger.warning(f"Engine {self.engine_id} model device verification failed")
-                        # 尝试获取模型的任何参数来确定设备
-                        try:
-                            for name, param in model.named_parameters():
-                                if param.requires_grad:
-                                    device = param.device
-                                    logger.info(f"Engine {self.engine_id} model parameter '{name}' on device: {device}")
-                                    break
-                        except Exception as e:
-                            logger.error(f"Engine {self.engine_id} failed to verify model device: {e}")
+                    logger.info(f"Engine {self.engine_id} GPU memory usage: {memory_used:.2f} MB")
             else:
                 # CPU 设备
                 model = TTS(
@@ -173,32 +162,12 @@ class TTSEngine:
                     # 记录推理前的GPU内存
                     gpu_memory_before = torch.cuda.memory_allocated(gpu_id) / 1024 / 1024  # MB
                     
-                    # 验证模型是否在正确的GPU上
-                    if hasattr(self.model, 'synthesizer') and hasattr(self.model.synthesizer, 'model'):
-                        device = next(self.model.synthesizer.model.parameters()).device
-                        logger.debug(f"Engine {self.engine_id} model is on device: {device}")
-                        if str(device) != f"cuda:{gpu_id}":
-                            logger.warning(f"Engine {self.engine_id} model is on wrong device: {device}, expected cuda:{gpu_id}")
-                    elif hasattr(self.model, 'model'):
-                        device = next(self.model.model.parameters()).device
-                        logger.debug(f"Engine {self.engine_id} model is on device: {device}")
-                        if str(device) != f"cuda:{gpu_id}":
-                            logger.warning(f"Engine {self.engine_id} model is on wrong device: {device}, expected cuda:{gpu_id}")
-                    else:
-                        # 尝试其他方式验证设备
-                        try:
-                            for name, param in self.model.named_parameters():
-                                if param.requires_grad:
-                                    device = param.device
-                                    logger.debug(f"Engine {self.engine_id} model parameter '{name}' on device: {device}")
-                                    if str(device) != f"cuda:{gpu_id}":
-                                        logger.warning(f"Engine {self.engine_id} model parameter '{name}' is on wrong device: {device}, expected cuda:{gpu_id}")
-                                    break
-                        except Exception as e:
-                            logger.error(f"Engine {self.engine_id} failed to verify model device during inference: {e}")
+                    # 优化GPU内存使用
+                    torch.cuda.empty_cache()
             
             # 执行TTS推理 - 对于单说话人模型，不传入 speaker 参数
-            audio = self.model.tts(text)
+            with torch.no_grad():  # 禁用梯度计算以提高性能
+                audio = self.model.tts(text)
             
             # 记录推理后的GPU内存
             if self.device == "cuda":
@@ -277,13 +246,6 @@ class TTSEngine:
                     if hasattr(self.model, 'to'):
                         self.model.to(f"cuda:{gpu_id}")
                         logger.info(f"Engine {self.engine_id} forced model to GPU {gpu_id}")
-                    
-                    # 验证模型是否在GPU上
-                    if hasattr(self.model, 'synthesizer') and hasattr(self.model.synthesizer, 'model'):
-                        for param in self.model.synthesizer.model.parameters():
-                            if param.device.type != 'cuda':
-                                logger.warning(f"Engine {self.engine_id} model parameter not on GPU: {param.device}")
-                                param.data = param.data.to(f"cuda:{gpu_id}")
                     
                     logger.info(f"Engine {self.engine_id} GPU verification completed")
                 except Exception as e:

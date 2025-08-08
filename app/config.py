@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # 服务配置
     HOST: str = "0.0.0.0"
     PORT: int = 8421 
-    WORKERS: int = 8  
+    WORKERS: int = 4  # 减少worker数量以减少GPU竞争
     
     # TTS模型配置 - 使用中文模型
     MODEL_NAME: str = "tts_models/zh-CN/baker/tacotron2-DDC-GST"  # 中文 Tacotron2-GST 模型
@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # 性能配置
     REQUEST_TIMEOUT: int = 30  # 请求超时时间（秒）
     MAX_TEXT_LENGTH: int = 500  # 最大文本长度
+    
+    # GPU优化配置
+    GPU_OPTIMIZATION: bool = True  # 启用GPU优化
+    GPU_MEMORY_FRACTION: float = 0.8  # GPU内存使用比例
     
     # 日志配置
     LOG_LEVEL: str = "INFO"
