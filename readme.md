@@ -30,7 +30,7 @@ DEVICE: str = "auto"       # 推理设备 (auto/cpu/cuda)
 
 ```bash
 # 创建新的 conda 环境
-conda create -n tts-server python=3.10
+conda create -n tts-server python=3.9
 
 # 激活环境
 conda activate tts-server
@@ -136,11 +136,3 @@ python stress_test.py --url http://localhost:8422 --concurrent 4 --total 20
 - `pydantic` - 数据验证
 - `psutil` - 系统监控
 
-## 功能特性
-
-- ✅ **多设备支持**：CPU、CUDA GPU、Apple Silicon MPS
-- ✅ **实时监控**：内存使用趋势图
-- ✅ **健康检查**：服务状态监控
-- ✅ **压力测试**：性能测试工具
-- ✅ **并发处理**：8 个 worker 支持
-- ✅ **中文模型**：Tacotron2-DDC-GST
