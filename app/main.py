@@ -60,8 +60,14 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """服务关闭事件"""
-    global executor
+    global executor, tts_manager
     logger.info("Shutting down TTS Server...")
+    
+    # 关闭TTS引擎管理器
+    if tts_manager:
+        tts_manager.shutdown()
+    
+    # 关闭线程池
     if executor:
         executor.shutdown(wait=True)
 

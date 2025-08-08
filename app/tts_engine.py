@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from TTS.api import TTS
 from collections import deque
+import queue
+from concurrent.futures import Future
 
 from .config import settings, get_device
 from .utils import audio_to_base64, validate_text, format_response
@@ -119,16 +121,20 @@ class TTSEngine:
     
     def synthesize(self, text: str, speaker: str = "default") -> Dict[str, Any]:
         """合成语音 - 线程安全版本"""
-        # 检查是否已经忙碌
-        if self.busy:
-            return format_response(
-                success=False,
-                error=f"Engine {self.engine_id} is busy with task: {self._current_task}"
-            )
-        
-        # 设置忙碌状态
-        task_info = f"synthesize: {text[:20]}{'...' if len(text) > 20 else ''}"
-        self._set_busy(True, task_info)
+        # 使用原子操作检查和设置忙碌状态
+        with self._lock:
+            # 检查是否已经忙碌
+            if self._busy:
+                return format_response(
+                    success=False,
+                    error=f"Engine {self.engine_id} is busy with task: {self._current_task}"
+                )
+            
+            # 设置忙碌状态
+            task_info = f"synthesize: {text[:20]}{'...' if len(text) > 20 else ''}"
+            self._busy = True
+            self._current_task = task_info
+            self._start_time = time.time()
         
         try:
             # 验证输入
@@ -171,7 +177,10 @@ class TTSEngine:
             )
         finally:
             # 无论成功还是失败，都要释放忙碌状态
-            self._set_busy(False)
+            with self._lock:
+                self._busy = False
+                self._current_task = None
+                self._start_time = None
     
     def get_model_info(self) -> Dict[str, Any]:
         """获取模型信息"""
@@ -197,18 +206,20 @@ class TTSEngine:
             }
 
 class TTSEngineManager:
-    """TTS引擎管理器 - 支持智能分配和排队机制"""
+    """TTS引擎管理器 - 使用生产者-消费者模式"""
     
     def __init__(self, num_workers: int = None):
         self.num_workers = num_workers or settings.WORKERS
         self.engines = []
         self.start_time = time.time()
         
-        # 排队机制
-        self.request_queue = deque()
-        self.queue_lock = threading.RLock()
-        self.max_queue_size = 100  # 最大队列长度
-        self.queue_timeout = 30.0  # 队列等待超时时间（秒）
+        # 请求队列 - 使用线程安全的Queue
+        self.request_queue = queue.Queue(maxsize=100)
+        self.max_queue_size = 100
+        
+        # 结果存储 - 使用字典存储Future对象
+        self.results = {}
+        self.results_lock = threading.RLock()
         
         # 统计信息
         self.total_requests = 0
@@ -217,11 +228,18 @@ class TTSEngineManager:
         self.queue_full_count = 0
         self.timeout_count = 0
         
+        # 线程控制
+        self.worker_threads = []
+        self.running = True
+        
         logger.info(f"Initializing TTS Engine Manager with {self.num_workers} workers")
         logger.info(f"Using model: {settings.MODEL_NAME}")
         
         # 预加载所有worker的模型
         self._preload_models()
+        
+        # 启动worker线程
+        self._start_worker_threads()
     
     def _preload_models(self):
         """预加载所有worker的模型"""
@@ -243,163 +261,124 @@ class TTSEngineManager:
         
         logger.info(f"Successfully loaded {len(self.engines)} models")
     
-    def get_available_engine(self) -> Optional[TTSEngine]:
-        """获取可用的引擎 - 优先选择空闲的引擎"""
-        if not self.engines:
-            return None
+    def _start_worker_threads(self):
+        """启动worker线程"""
+        logger.info("Starting worker threads...")
         
-        # 首先尝试找到空闲的引擎
-        for engine in self.engines:
-            if engine.available:
-                return engine
-        
-        # 如果没有空闲引擎，返回None（需要排队）
-        return None
-    
-    def get_engine_by_id(self, engine_id: int) -> Optional[TTSEngine]:
-        """根据ID获取引擎"""
-        if 0 <= engine_id < len(self.engines):
-            return self.engines[engine_id]
-        return None
-    
-    def add_to_queue(self, text: str, speaker: str = "default") -> Dict[str, Any]:
-        """将请求添加到队列"""
-        with self.queue_lock:
-            if len(self.request_queue) >= self.max_queue_size:
-                self.queue_full_count += 1
-                return format_response(
-                    success=False,
-                    error=f"Queue is full (max size: {self.max_queue_size}). Please try again later."
-                )
-            
-            # 创建队列项
-            queue_item = {
-                "text": text,
-                "speaker": speaker,
-                "timestamp": time.time(),
-                "id": self.total_requests
-            }
-            
-            self.request_queue.append(queue_item)
-            self.total_requests += 1
-            
-            queue_position = len(self.request_queue)
-            logger.info(f"Request {queue_item['id']} added to queue at position {queue_position}")
-            
-            return format_response(
-                success=True,
-                data={
-                    "queued": True,
-                    "queue_position": queue_position,
-                    "estimated_wait_time": queue_position * 2.0,  # 估算等待时间
-                    "request_id": queue_item["id"]
-                }
+        for i, engine in enumerate(self.engines):
+            thread = threading.Thread(
+                target=self._worker_loop,
+                args=(engine,),
+                name=f"TTSWorker-{i}",
+                daemon=True
             )
+            thread.start()
+            self.worker_threads.append(thread)
+            logger.info(f"Started worker thread {i} for engine {engine.engine_id}")
     
-    def process_queue(self) -> Optional[Dict[str, Any]]:
-        """处理队列中的请求"""
-        with self.queue_lock:
-            if not self.request_queue:
-                return None
-            
-            # 检查队列中的第一个请求是否超时
-            first_item = self.request_queue[0]
-            if time.time() - first_item["timestamp"] > self.queue_timeout:
-                # 超时，移除请求
-                self.request_queue.popleft()
-                self.timeout_count += 1
-                logger.warning(f"Request {first_item['id']} timed out in queue")
-                return format_response(
-                    success=False,
-                    error="Request timed out in queue",
-                    data={"request_id": first_item["id"]}
-                )
-            
-            # 尝试获取可用引擎
-            engine = self.get_available_engine()
-            if engine is None:
-                return None  # 没有可用引擎，继续等待
-            
-            # 有可用引擎，处理队列中的第一个请求
-            queue_item = self.request_queue.popleft()
-            logger.info(f"Processing queued request {queue_item['id']} with engine {engine.engine_id}")
-            
-            # 执行合成
-            result = engine.synthesize(queue_item["text"], queue_item["speaker"])
-            
-            # 添加请求ID到结果中
-            if result["success"] and "data" in result:
-                result["data"]["request_id"] = queue_item["id"]
-            elif not result["success"]:
-                result["data"] = {"request_id": queue_item["id"]}
-            
-            # 更新统计信息
-            if result["success"]:
-                self.successful_requests += 1
-            else:
-                self.failed_requests += 1
-            
-            return result
+    def _worker_loop(self, engine: TTSEngine):
+        """Worker线程的主循环"""
+        logger.info(f"Worker thread {engine.engine_id} started")
+        
+        while self.running:
+            try:
+                # 从队列中获取请求，超时时间为1秒
+                try:
+                    request = self.request_queue.get(timeout=1.0)
+                except queue.Empty:
+                    # 队列为空，继续循环
+                    continue
+                
+                # 处理请求
+                logger.info(f"Worker {engine.engine_id} processing request {request['id']}")
+                result = engine.synthesize(request["text"], request["speaker"])
+                
+                # 添加请求ID到结果中
+                if result["success"] and "data" in result:
+                    result["data"]["request_id"] = request["id"]
+                elif not result["success"]:
+                    result["data"] = {"request_id": request["id"]}
+                
+                # 更新统计信息
+                if result["success"]:
+                    self.successful_requests += 1
+                else:
+                    self.failed_requests += 1
+                
+                # 设置结果
+                with self.results_lock:
+                    if request["id"] in self.results:
+                        future = self.results[request["id"]]
+                        future.set_result(result)
+                        del self.results[request["id"]]
+                
+                # 标记任务完成
+                self.request_queue.task_done()
+                
+                logger.info(f"Worker {engine.engine_id} completed request {request['id']}")
+                
+            except Exception as e:
+                logger.error(f"Worker {engine.engine_id} error: {e}")
+                # 如果队列中有任务，标记为完成
+                try:
+                    self.request_queue.task_done()
+                except:
+                    pass
+        
+        logger.info(f"Worker thread {engine.engine_id} stopped")
     
     def synthesize(self, text: str, speaker: str = "default", timeout: float = None) -> Dict[str, Any]:
-        """使用智能分配策略合成语音"""
+        """添加请求到队列并等待结果"""
         if timeout is None:
-            timeout = self.queue_timeout
+            timeout = 30.0
         
-        start_time = time.time()
+        # 创建请求
+        request_id = self.total_requests
+        request = {
+            "text": text,
+            "speaker": speaker,
+            "timestamp": time.time(),
+            "id": request_id
+        }
         
-        # 首先尝试获取可用引擎
-        engine = self.get_available_engine()
-        if engine is not None:
-            # 有可用引擎，直接处理
-            logger.info(f"Direct processing with engine {engine.engine_id}")
-            result = engine.synthesize(text, speaker)
+        self.total_requests += 1
+        
+        # 创建Future对象
+        future = Future()
+        with self.results_lock:
+            self.results[request_id] = future
+        
+        try:
+            # 尝试将请求添加到队列
+            self.request_queue.put(request, timeout=timeout)
+            logger.info(f"Request {request_id} added to queue")
             
-            # 更新统计信息
-            if result["success"]:
-                self.successful_requests += 1
-            else:
-                self.failed_requests += 1
-            
+            # 等待结果
+            result = future.result(timeout=timeout)
             return result
-        
-        # 没有可用引擎，需要排队
-        logger.info("No available engines, adding request to queue")
-        queue_result = self.add_to_queue(text, speaker)
-        
-        if not queue_result["success"]:
-            return queue_result
-        
-        request_id = queue_result["data"]["request_id"]
-        
-        # 等待处理
-        wait_start = time.time()
-        while time.time() - wait_start < timeout:
-            # 尝试处理队列
-            result = self.process_queue()
-            if result is not None:
-                # 检查是否是我们的请求
-                result_request_id = result.get("data", {}).get("request_id")
-                if result_request_id == request_id:
-                    return result
             
-            # 短暂等待后重试
-            time.sleep(0.1)
-        
-        # 超时，从队列中移除请求
-        with self.queue_lock:
-            # 查找并移除超时的请求
-            for i, item in enumerate(self.request_queue):
-                if item["id"] == request_id:
-                    self.request_queue.remove(item)
-                    break
-        
-        self.timeout_count += 1
-        return format_response(
-            success=False,
-            error=f"Request timed out after {timeout:.1f}s",
-            data={"request_id": request_id}
-        )
+        except queue.Full:
+            # 队列已满
+            self.queue_full_count += 1
+            with self.results_lock:
+                if request_id in self.results:
+                    del self.results[request_id]
+            return format_response(
+                success=False,
+                error=f"Queue is full (max size: {self.max_queue_size}). Please try again later.",
+                data={"request_id": request_id}
+            )
+        except Exception as e:
+            # 其他错误
+            with self.results_lock:
+                if request_id in self.results:
+                    del self.results[request_id]
+            self.timeout_count += 1
+            return format_response(
+                success=False,
+                error=f"Request failed: {str(e)}",
+                data={"request_id": request_id}
+            )
     
     def get_status(self) -> Dict[str, Any]:
         """获取服务状态"""
@@ -423,13 +402,11 @@ class TTSEngineManager:
                 busy_engines += 1
         
         # 队列状态
-        with self.queue_lock:
-            queue_size = len(self.request_queue)
-            queue_status = {
-                "size": queue_size,
-                "max_size": self.max_queue_size,
-                "timeout": self.queue_timeout
-            }
+        queue_size = self.request_queue.qsize()
+        queue_status = {
+            "size": queue_size,
+            "max_size": self.max_queue_size
+        }
         
         return {
             "uptime": time.time() - self.start_time,
@@ -451,4 +428,15 @@ class TTSEngineManager:
                 "timeout_count": self.timeout_count
             },
             "engine_statuses": engine_statuses
-        } 
+        }
+    
+    def shutdown(self):
+        """关闭服务"""
+        logger.info("Shutting down TTS Engine Manager...")
+        self.running = False
+        
+        # 等待所有worker线程结束
+        for thread in self.worker_threads:
+            thread.join(timeout=5.0)
+        
+        logger.info("TTS Engine Manager shutdown complete") 
