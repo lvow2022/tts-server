@@ -18,13 +18,6 @@ class Settings(BaseSettings):
     VOCODER_NAME: str = "vocoder_models/universal/hifigan_v2" 
     DEVICE: str = "auto"  # auto, cpu, cuda
     
-    # TTS模型推理参数
-    MAX_DECODER_STEPS: int = 2000  # 最大解码步数，默认500可能不够
-    STOP_THRESHOLD: float = 0.5  # 停止阈值
-    LENGTH_SCALE: float = 1.0  # 长度缩放因子
-    NOISE_SCALE: float = 0.667  # 噪声缩放因子
-    NOISE_W: float = 0.8  # 噪声权重
-    
     # 音频配置
     SAMPLE_RATE: int = 22050
     AUDIO_FORMAT: str = "wav"  # wav, mp3

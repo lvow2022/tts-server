@@ -165,16 +165,9 @@ class TTSEngine:
                     # 优化GPU内存使用
                     torch.cuda.empty_cache()
             
-            # 执行TTS推理 - 传入解码参数以控制合成过程
+            # 执行TTS推理 - 对于单说话人模型，不传入 speaker 参数
             with torch.no_grad():  # 禁用梯度计算以提高性能
-                audio = self.model.tts(
-                    text,
-                    max_decoder_steps=settings.MAX_DECODER_STEPS,
-                    stop_threshold=settings.STOP_THRESHOLD,
-                    length_scale=settings.LENGTH_SCALE,
-                    noise_scale=settings.NOISE_SCALE,
-                    noise_w=settings.NOISE_W
-                )
+                audio = self.model.tts(text)
             
             # 记录推理后的GPU内存
             if self.device == "cuda":
