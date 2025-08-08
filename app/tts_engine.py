@@ -25,12 +25,8 @@ class TTSEngine:
         self.audio_format = settings.AUDIO_FORMAT
         self.max_text_length = settings.MAX_TEXT_LENGTH
         
-        # 在初始化时直接加载模型，而不是使用threading.local()
+        # 在初始化时直接加载模型
         self.model = self._load_model()
-        
-        # 强制GPU使用（如果是CUDA设备）
-        if self.device == "cuda":
-            self.force_gpu_usage()
         
         logger.info(f"TTS Engine {engine_id} initialized on device: {self.device}")
     
@@ -91,33 +87,12 @@ class TTSEngine:
                     torch.cuda.set_device(gpu_id)
                     logger.info(f"Engine {self.engine_id} using GPU {gpu_id}: {torch.cuda.get_device_name(gpu_id)}")
                     
-                    # 应用GPU优化配置
-                    if settings.GPU_OPTIMIZATION:
-                        # 设置GPU内存使用限制
-                        torch.cuda.set_per_process_memory_fraction(settings.GPU_MEMORY_FRACTION, gpu_id)
-                        logger.info(f"Engine {self.engine_id} GPU memory fraction set to {settings.GPU_MEMORY_FRACTION}")
-                    
-                    # 记录加载前的显存
-                    memory_before = torch.cuda.memory_allocated(gpu_id) / 1024 / 1024  # MB
-                    
-                    # 强制使用GPU
+                    # 加载模型
                     model = TTS(
                         model_name=settings.MODEL_NAME,
                         progress_bar=False,
                         gpu=True
                     )
-                    
-                    # 确保模型在正确的GPU上
-                    model.to(f"cuda:{gpu_id}")
-                    
-                    # 优化GPU内存分配
-                    torch.cuda.empty_cache()
-                    
-                    # 记录加载后的显存
-                    memory_after = torch.cuda.memory_allocated(gpu_id) / 1024 / 1024  # MB
-                    memory_used = memory_after - memory_before
-                    
-                    logger.info(f"Engine {self.engine_id} GPU memory usage: {memory_used:.2f} MB")
             else:
                 # CPU 设备
                 model = TTS(
@@ -148,35 +123,9 @@ class TTSEngine:
             # 直接使用已加载的模型进行推理
             start_time = time.time()
             
-            # 确保在正确的GPU上下文中执行推理
-            gpu_memory_before = 0
-            gpu_memory_after = 0
-            if self.device == "cuda":
-                import torch
-                if torch.cuda.is_available():
-                    # 设置正确的GPU设备
-                    gpu_id = self.engine_id % torch.cuda.device_count()
-                    torch.cuda.set_device(gpu_id)
-                    logger.debug(f"Engine {self.engine_id} using GPU {gpu_id} for inference")
-                    
-                    # 记录推理前的GPU内存
-                    gpu_memory_before = torch.cuda.memory_allocated(gpu_id) / 1024 / 1024  # MB
-                    
-                    # 优化GPU内存使用
-                    torch.cuda.empty_cache()
-            
-            # 执行TTS推理 - 对于单说话人模型，不传入 speaker 参数
+            # 执行TTS推理
             with torch.no_grad():  # 禁用梯度计算以提高性能
                 audio = self.model.tts(text)
-            
-            # 记录推理后的GPU内存
-            if self.device == "cuda":
-                import torch
-                if torch.cuda.is_available():
-                    gpu_id = self.engine_id % torch.cuda.device_count()
-                    gpu_memory_after = torch.cuda.memory_allocated(gpu_id) / 1024 / 1024  # MB
-                    memory_diff = gpu_memory_after - gpu_memory_before
-                    logger.info(f"Engine {self.engine_id} GPU memory: {gpu_memory_before:.2f}MB -> {gpu_memory_after:.2f}MB (diff: {memory_diff:+.2f}MB)")
             
             inference_time = time.time() - start_time
             logger.info(f"Engine {self.engine_id} TTS inference completed in {inference_time:.3f}s on {self.device}")
@@ -223,33 +172,7 @@ class TTSEngine:
                 "error": str(e)
             }
     
-    def clear_gpu_cache(self):
-        """清理GPU缓存"""
-        if self.device == "cuda":
-            import torch
-            if torch.cuda.is_available():
-                gpu_id = self.engine_id % torch.cuda.device_count()
-                torch.cuda.set_device(gpu_id)
-                torch.cuda.empty_cache()
-                logger.debug(f"Engine {self.engine_id} cleared GPU cache")
-    
-    def force_gpu_usage(self):
-        """强制模型使用GPU"""
-        if self.device == "cuda":
-            import torch
-            if torch.cuda.is_available():
-                gpu_id = self.engine_id % torch.cuda.device_count()
-                torch.cuda.set_device(gpu_id)
-                
-                # 强制将模型移动到GPU
-                try:
-                    if hasattr(self.model, 'to'):
-                        self.model.to(f"cuda:{gpu_id}")
-                        logger.info(f"Engine {self.engine_id} forced model to GPU {gpu_id}")
-                    
-                    logger.info(f"Engine {self.engine_id} GPU verification completed")
-                except Exception as e:
-                    logger.error(f"Engine {self.engine_id} failed to force GPU usage: {e}")
+
 
 class TTSEngineManager:
     """TTS引擎管理器 - 使用生产者-消费者模式"""
@@ -294,13 +217,9 @@ class TTSEngineManager:
         for i in range(self.num_workers):
             try:
                 engine = TTSEngine(i)
-                # 模型已经在初始化时加载，这里只需要验证模型是否正常工作
-                test_result = engine.synthesize("你好世界，这是一个文本转语音的测试。", "default")
-                if test_result["success"]:
-                    self.engines.append(engine)
-                    logger.info(f"Worker {i} model loaded and tested successfully")
-                else:
-                    logger.error(f"Worker {i} model test failed: {test_result.get('error')}")
+                # 模型已经在初始化时加载，直接添加到引擎列表
+                self.engines.append(engine)
+                logger.info(f"Worker {i} model loaded successfully")
                     
             except Exception as e:
                 logger.error(f"Failed to load model for worker {i}: {e}")
@@ -325,9 +244,6 @@ class TTSEngineManager:
     def _worker_loop(self, engine: TTSEngine):
         """Worker线程的主循环"""
         logger.info(f"Worker thread {engine.engine_id} started")
-        
-        # 定期清理GPU缓存的计数器
-        cleanup_counter = 0
         
         while self.running:
             try:
@@ -365,12 +281,6 @@ class TTSEngineManager:
                 self.request_queue.task_done()
                 
                 logger.info(f"Worker {engine.engine_id} completed request {request['id']}")
-                
-                # 每处理10个请求后清理一次GPU缓存
-                cleanup_counter += 1
-                if cleanup_counter >= 10:
-                    engine.clear_gpu_cache()
-                    cleanup_counter = 0
                 
             except Exception as e:
                 logger.error(f"Worker {engine.engine_id} error: {e}")
