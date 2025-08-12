@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
 
@@ -223,14 +224,15 @@ func (c *TTSClient) DecodeAudioFrameWithFormat(frame *AudioFrame, bitDepth int) 
 			// 小端序读取int16
 			sample := int16(data[i]) | int16(data[i+1])<<8
 			// 转换为float32，范围[-1.0, 1.0]
-			audioData[i/2] = float32(sample) / 32768.0
+			audioData[i/2] = float32(sample) / 32767.0
 		}
 	case 32:
-		// 32位浮点数
+		// 32位浮点数 - 使用math.Float32frombits确保正确的字节序转换
 		for i := 0; i < len(data); i += 4 {
-			// 小端序读取float32
+			// 小端序读取uint32
 			bits := uint32(data[i]) | uint32(data[i+1])<<8 | uint32(data[i+2])<<16 | uint32(data[i+3])<<24
-			audioData[i/4] = float32(bits)
+			// 使用math.Float32frombits进行正确的转换
+			audioData[i/4] = math.Float32frombits(bits)
 		}
 	default:
 		return nil, fmt.Errorf("不支持的位深度: %d", bitDepth)
