@@ -137,6 +137,7 @@ class TTSEngine:
                 success=True,
                 data={
                     "audio": audio_base64,
+                    "audio_raw": audio,  # 添加原始音频数据
                     "sample_rate": self.sample_rate,
                     "format": self.audio_format,
                     "text": text,

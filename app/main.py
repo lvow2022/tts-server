@@ -271,12 +271,8 @@ async def websocket_synthesize(websocket: WebSocket):
         result = await synthesize_audio_async(text, speaker)
         
         if result["success"]:
-            # 获取音频数据
-            audio_data = result["data"]["audio"]
-            # 解码base64音频数据
-            audio_bytes = base64.b64decode(audio_data)
-            # 转换为numpy数组
-            audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
+            # 获取音频数据 - 直接使用原始numpy数组
+            audio_array = result["data"]["audio_raw"]  # 需要修改TTS引擎返回原始数据
             
             # 4. 发送合成完成消息
             await websocket.send_json({

@@ -98,17 +98,11 @@
                 
                 if (result.success) {
                     log('音频合成成功');
-                    log(`音频数据长度: ${result.data.audio.length}`);
+                    log(`原始音频数据长度: ${result.data.audio_raw.length}`);
+                    log(`前5个值: ${result.data.audio_raw.slice(0, 5)}`);
                     
-                    // 解码音频数据
-                    const audioData = atob(result.data.audio);
-                    const uint8Array = new Uint8Array(audioData);
-                    
-                    log(`解码后字节长度: ${uint8Array.length}`);
-                    log(`前10个字节: ${Array.from(uint8Array.slice(0, 10))}`);
-                    
-                    // 转换为Float32数组
-                    const audioArray = new Float32Array(uint8Array.buffer);
+                    // 直接使用原始音频数据
+                    const audioArray = new Float32Array(result.data.audio_raw);
                     log(`Float32数组长度: ${audioArray.length}`);
                     log(`前5个值: ${Array.from(audioArray.slice(0, 5))}`);
                     
