@@ -139,6 +139,7 @@
         let audioContext = null;
         let audioQueue = [];
         let isPlaying = false;
+        let currentFrameInfo = null;
         
         function log(message) {
             const logDiv = document.getElementById('log');
@@ -179,40 +180,46 @@
             };
             
             ws.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                log(`收到消息: ${data.type}`);
-                
-                switch(data.type) {
-                    case 'start':
-                        log(`开始合成: "${data.text}"`);
-                        document.getElementById('progressContainer').style.display = 'block';
-                        document.getElementById('progressBar').style.width = '0%';
-                        break;
-                        
-                    case 'synthesized':
-                        log(`音频合成完成: ${data.audio_length} 采样点, ${data.duration_ms.toFixed(0)}ms`);
-                        break;
-                        
-                    case 'audio_frame':
-                        log(`收到音频帧 ${data.frame_id}: ${data.timestamp_ms.toFixed(0)}ms`);
-                        
-                        // 更新进度条
-                        const progress = (data.frame_id / 100) * 100; // 假设总共100帧
-                        document.getElementById('progressBar').style.width = Math.min(progress, 100) + '%';
-                        
-                        // 处理音频帧
-                        handleAudioFrame(data);
-                        break;
-                        
-                    case 'complete':
-                        log(`合成完成: 共${data.total_frames}帧, 总时长${data.total_duration_ms.toFixed(0)}ms`);
-                        document.getElementById('progressContainer').style.display = 'none';
-                        break;
-                        
-                    case 'error':
-                        log(`错误: ${data.error}`);
-                        document.getElementById('progressContainer').style.display = 'none';
-                        break;
+                if (event.data instanceof Blob) {
+                    // 处理二进制PCM数据
+                    handlePCMData(event.data);
+                } else {
+                    // 处理JSON消息
+                    const data = JSON.parse(event.data);
+                    log(`收到消息: ${data.type}`);
+                    
+                    switch(data.type) {
+                        case 'start':
+                            log(`开始合成: "${data.text}"`);
+                            document.getElementById('progressContainer').style.display = 'block';
+                            document.getElementById('progressBar').style.width = '0%';
+                            break;
+                            
+                        case 'synthesized':
+                            log(`音频合成完成: ${data.audio_length} 采样点, ${data.duration_ms.toFixed(0)}ms`);
+                            break;
+                            
+                        case 'audio_frame':
+                            log(`收到音频帧 ${data.frame_id}: ${data.timestamp_ms.toFixed(0)}ms, 数据长度: ${data.data_length} 字节`);
+                            
+                            // 更新进度条
+                            const progress = (data.frame_id / 100) * 100; // 假设总共100帧
+                            document.getElementById('progressBar').style.width = Math.min(progress, 100) + '%';
+                            
+                            // 等待接收PCM数据
+                            currentFrameInfo = data;
+                            break;
+                            
+                        case 'complete':
+                            log(`合成完成: 共${data.total_frames}帧, 总时长${data.total_duration_ms.toFixed(0)}ms`);
+                            document.getElementById('progressContainer').style.display = 'none';
+                            break;
+                            
+                        case 'error':
+                            log(`错误: ${data.error}`);
+                            document.getElementById('progressContainer').style.display = 'none';
+                            break;
+                    }
                 }
             };
             
@@ -278,13 +285,17 @@
             }
         }
         
-        function handleAudioFrame(frameData) {
+        async function handlePCMData(blob) {
             try {
-                // 解码音频数据
-                const audioData = atob(frameData.data);
-                const uint8Array = new Uint8Array(audioData);
+                if (!currentFrameInfo) {
+                    log('警告: 收到PCM数据但没有帧信息');
+                    return;
+                }
                 
-                log(`音频帧 ${frameData.frame_id}: 字节长度 ${uint8Array.length}`);
+                const arrayBuffer = await blob.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                log(`PCM数据: ${currentFrameInfo.frame_id} 帧, ${uint8Array.length} 字节`);
                 
                 // 检查字节长度是否为4的倍数（Float32每个值4字节）
                 if (uint8Array.length % 4 !== 0) {
@@ -295,11 +306,11 @@
                 // 将字节数据转换为Float32数组
                 const audioArray = new Float32Array(uint8Array.buffer);
                 
-                log(`音频帧 ${frameData.frame_id}: ${audioArray.length} 采样点`);
+                log(`音频帧 ${currentFrameInfo.frame_id}: ${audioArray.length} 采样点`);
                 
                 // 检查音频数据是否有效
                 if (audioArray.length === 0) {
-                    log(`警告: 音频帧 ${frameData.frame_id} 长度为0，跳过`);
+                    log(`警告: 音频帧 ${currentFrameInfo.frame_id} 长度为0，跳过`);
                     return;
                 }
                 
@@ -310,9 +321,11 @@
                 if (!isPlaying) {
                     playAudioQueue();
                 }
+                
+                // 清除当前帧信息
+                currentFrameInfo = null;
             } catch (error) {
-                log(`音频帧处理错误: ${error}`);
-                log(`原始数据长度: ${frameData.data.length}`);
+                log(`PCM数据处理错误: ${error}`);
             }
         }
         

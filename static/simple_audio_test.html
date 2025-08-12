@@ -106,12 +106,11 @@
                 
                 if (result.success) {
                     log('音频合成成功');
-                    log(`音频bytes数据长度: ${result.data.audio_bytes.length}`);
+                    log(`音频PCM数据长度: ${result.data.audio_pcm.length} 字节`);
                     
-                    // 解码bytes数据
-                    const audioData = atob(result.data.audio_bytes);
-                    const uint8Array = new Uint8Array(audioData);
-                    log(`解码后字节长度: ${uint8Array.length}`);
+                    // 直接使用PCM数据
+                    const uint8Array = new Uint8Array(result.data.audio_pcm);
+                    log(`PCM字节长度: ${uint8Array.length}`);
                     
                     // 转换为Float32数组
                     const audioArray = new Float32Array(uint8Array.buffer);

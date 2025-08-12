@@ -293,8 +293,8 @@ async def websocket_synthesize(websocket: WebSocket):
         result = await synthesize_audio_async(text, speaker)
         
         if result["success"]:
-            # 获取音频数据 - 使用bytes格式
-            audio_bytes = base64.b64decode(result["data"]["audio_bytes"])
+            # 获取音频数据 - 直接使用PCM数据
+            audio_bytes = result["data"]["audio_pcm"]
             
             # 4. 发送合成完成消息
             total_samples = len(audio_bytes) // 4  # 4字节/float32
@@ -311,14 +311,19 @@ async def websocket_synthesize(websocket: WebSocket):
             
             for frame in audio_frames:
                 logger.debug(f"发送帧 {frame['frame_id']}: {len(frame['data'])} 字节")
-                frame_data = {
+                
+                # 发送帧信息
+                frame_info = {
                     "type": "audio_frame",
                     "frame_id": frame["frame_id"],
-                    "data": base64.b64encode(frame["data"]).decode(),
+                    "data_length": len(frame["data"]),
                     "timestamp_ms": frame["timestamp_ms"],
                     "is_last": frame["is_last"]
                 }
-                await websocket.send_json(frame_data)
+                await websocket.send_json(frame_info)
+                
+                # 发送PCM数据
+                await websocket.send_bytes(frame["data"])
                 
                 # 模拟实时发送间隔（可选）
                 await asyncio.sleep(0.01)  # 10ms间隔
