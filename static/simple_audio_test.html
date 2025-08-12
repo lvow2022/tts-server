@@ -114,7 +114,11 @@
                         const audioData = atob(result.data.audio_pcm);
                         log(`解码后数据长度: ${audioData.length}`);
                         
-                        const uint8Array = new Uint8Array(audioData);
+                        // 将字符串转换为Uint8Array
+                        const uint8Array = new Uint8Array(audioData.length);
+                        for (let i = 0; i < audioData.length; i++) {
+                            uint8Array[i] = audioData.charCodeAt(i);
+                        }
                         log(`PCM字节长度: ${uint8Array.length}`);
                         log(`前10个字节: ${Array.from(uint8Array.slice(0, 10))}`);
                         
