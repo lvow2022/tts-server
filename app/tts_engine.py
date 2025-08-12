@@ -133,11 +133,17 @@ class TTSEngine:
             # 转换为base64
             audio_base64 = audio_to_base64(audio, self.sample_rate, self.audio_format)
             
+            # 确保音频数据是列表格式
+            if hasattr(audio, 'tolist'):
+                audio_list = audio.tolist()
+            else:
+                audio_list = list(audio)
+                
             return format_response(
                 success=True,
                 data={
                     "audio": audio_base64,
-                    "audio_raw": audio.tolist(),  # 转换为Python列表以便JSON序列化
+                    "audio_raw": audio_list,  # 转换为Python列表以便JSON序列化
                     "sample_rate": self.sample_rate,
                     "format": self.audio_format,
                     "text": text,
