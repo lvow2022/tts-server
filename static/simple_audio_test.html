@@ -106,10 +106,11 @@
                 
                 if (result.success) {
                     log('音频合成成功');
-                    log(`音频PCM数据长度: ${result.data.audio_pcm.length} 字节`);
+                    log(`音频PCM数据长度: ${result.data.audio_pcm.length} 字符`);
                     
-                    // 直接使用PCM数据
-                    const uint8Array = new Uint8Array(result.data.audio_pcm);
+                    // 解码base64的PCM数据
+                    const audioData = atob(result.data.audio_pcm);
+                    const uint8Array = new Uint8Array(audioData);
                     log(`PCM字节长度: ${uint8Array.length}`);
                     
                     // 转换为Float32数组

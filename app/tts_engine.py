@@ -148,7 +148,7 @@ class TTSEngine:
                 success=True,
                 data={
                     "audio": audio_base64,
-                    "audio_pcm": audio_bytes,  # 直接使用原始PCM数据
+                    "audio_pcm": base64.b64encode(audio_bytes).decode(),  # PCM数据编码为base64
                     "sample_rate": self.sample_rate,
                     "format": self.audio_format,
                     "text": text,

@@ -293,8 +293,8 @@ async def websocket_synthesize(websocket: WebSocket):
         result = await synthesize_audio_async(text, speaker)
         
         if result["success"]:
-            # 获取音频数据 - 直接使用PCM数据
-            audio_bytes = result["data"]["audio_pcm"]
+            # 获取音频数据 - 解码base64的PCM数据
+            audio_bytes = base64.b64decode(result["data"]["audio_pcm"])
             
             # 4. 发送合成完成消息
             total_samples = len(audio_bytes) // 4  # 4字节/float32
