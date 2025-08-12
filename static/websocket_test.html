@@ -282,9 +282,18 @@
             try {
                 // 解码音频数据
                 const audioData = atob(frameData.data);
-                const audioArray = new Float32Array(audioData.buffer);
+                const uint8Array = new Uint8Array(audioData);
+                
+                // 将字节数据转换为Float32数组
+                const audioArray = new Float32Array(uint8Array.buffer);
                 
                 log(`音频帧 ${frameData.frame_id}: ${audioArray.length} 采样点`);
+                
+                // 检查音频数据是否有效
+                if (audioArray.length === 0) {
+                    log(`警告: 音频帧 ${frameData.frame_id} 长度为0，跳过`);
+                    return;
+                }
                 
                 // 将音频帧加入队列
                 audioQueue.push(audioArray);
@@ -295,21 +304,7 @@
                 }
             } catch (error) {
                 log(`音频帧处理错误: ${error}`);
-                // 尝试备用解码方法
-                try {
-                    const audioData = atob(frameData.data);
-                    const uint8Array = new Uint8Array(audioData);
-                    const audioArray = new Float32Array(uint8Array.buffer);
-                    
-                    log(`备用解码成功: ${audioArray.length} 采样点`);
-                    audioQueue.push(audioArray);
-                    
-                    if (!isPlaying) {
-                        playAudioQueue();
-                    }
-                } catch (error2) {
-                    log(`备用解码也失败: ${error2}`);
-                }
+                log(`原始数据长度: ${frameData.data.length}`);
             }
         }
         
@@ -330,6 +325,12 @@
                 
                 while (audioQueue.length > 0) {
                     const audioArray = audioQueue.shift();
+                    
+                    // 检查音频数据是否有效
+                    if (audioArray.length === 0) {
+                        log('跳过空音频帧');
+                        continue;
+                    }
                     
                     // 创建音频缓冲区
                     const audioBuffer = audioContext.createBuffer(1, audioArray.length, 22050);

@@ -36,6 +36,11 @@ def split_audio_to_frames(audio: np.ndarray, frame_size: int = 2048, sample_rate
     
     for i in range(0, len(audio), frame_size):
         frame = audio[i:i + frame_size]
+        
+        # 跳过空帧
+        if len(frame) == 0:
+            continue
+            
         frames.append({
             "frame_id": len(frames) + 1,
             "data": frame,
@@ -282,6 +287,8 @@ async def websocket_synthesize(websocket: WebSocket):
             
             # 5. 分帧并快速发送
             audio_frames = split_audio_to_frames(audio_array, frame_size)
+            
+            logger.info(f"音频总长度: {len(audio_array)}, 分帧数: {len(audio_frames)}")
             
             for frame in audio_frames:
                 frame_data = {
