@@ -291,10 +291,13 @@ async def websocket_synthesize(websocket: WebSocket):
             logger.info(f"音频总长度: {len(audio_array)}, 分帧数: {len(audio_frames)}")
             
             for frame in audio_frames:
+                # 确保numpy数组使用小端字节序
+                frame_bytes = frame["data"].astype(np.float32).tobytes()
+                logger.debug(f"发送帧 {frame['frame_id']}: {len(frame['data'])} 采样点, {len(frame_bytes)} 字节")
                 frame_data = {
                     "type": "audio_frame",
                     "frame_id": frame["frame_id"],
-                    "data": base64.b64encode(frame["data"].tobytes()).decode(),
+                    "data": base64.b64encode(frame_bytes).decode(),
                     "timestamp_ms": frame["timestamp_ms"],
                     "is_last": frame["is_last"]
                 }
