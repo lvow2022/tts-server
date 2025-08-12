@@ -2,6 +2,7 @@ import threading
 import time
 import logging
 import asyncio
+import base64
 from typing import Dict, Any, Optional, List
 import numpy as np
 import torch
