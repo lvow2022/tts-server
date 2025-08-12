@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket TTS 测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .log {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .progress {
+            margin-top: 10px;
+            width: 100%;
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background-color: #007bff;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebSocket TTS 流式测试</h1>
+        
+        <div class="form-group">
+            <label for="text">文本内容:</label>
+            <textarea id="text" placeholder="输入要合成的文本...">Hello world, this is a WebSocket TTS test.</textarea>
+        </div>
+        
+        <div class="form-group">
+            <label for="frameSize">帧大小:</label>
+            <select id="frameSize">
+                <option value="1024">1024 (约46ms)</option>
+                <option value="2048" selected>2048 (约93ms)</option>
+                <option value="4096">4096 (约186ms)</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="speaker">说话人:</label>
+            <input type="text" id="speaker" value="default" placeholder="说话人ID">
+        </div>
+        
+        <button id="connectBtn" onclick="connect()">连接</button>
+        <button id="synthesizeBtn" onclick="synthesize()" disabled>开始合成</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>断开连接</button>
+        
+        <div id="status" class="status disconnected">
+            状态: 未连接
+        </div>
+        
+        <div class="progress" id="progressContainer" style="display: none;">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let audioContext = null;
+        let audioQueue = [];
+        let isPlaying = false;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const synthesizeBtn = document.getElementById('synthesizeBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            if (connected) {
+                statusDiv.className = 'status connected';
+                statusDiv.textContent = '状态: 已连接';
+                connectBtn.disabled = true;
+                synthesizeBtn.disabled = false;
+                disconnectBtn.disabled = false;
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = '状态: 未连接';
+                connectBtn.disabled = false;
+                synthesizeBtn.disabled = true;
+                disconnectBtn.disabled = true;
+            }
+        }
+        
+        function connect() {
+            const wsUrl = `ws://${window.location.host}/ws/synthesize`;
+            log(`连接WebSocket: ${wsUrl}`);
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                log('WebSocket连接已建立');
+                updateStatus(true);
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                log(`收到消息: ${data.type}`);
+                
+                switch(data.type) {
+                    case 'start':
+                        log(`开始合成: "${data.text}"`);
+                        document.getElementById('progressContainer').style.display = 'block';
+                        document.getElementById('progressBar').style.width = '0%';
+                        break;
+                        
+                    case 'synthesized':
+                        log(`音频合成完成: ${data.audio_length} 采样点, ${data.duration_ms.toFixed(0)}ms`);
+                        break;
+                        
+                    case 'audio_frame':
+                        log(`收到音频帧 ${data.frame_id}: ${data.timestamp_ms.toFixed(0)}ms`);
+                        
+                        // 更新进度条
+                        const progress = (data.frame_id / 100) * 100; // 假设总共100帧
+                        document.getElementById('progressBar').style.width = Math.min(progress, 100) + '%';
+                        
+                        // 处理音频帧
+                        handleAudioFrame(data);
+                        break;
+                        
+                    case 'complete':
+                        log(`合成完成: 共${data.total_frames}帧, 总时长${data.total_duration_ms.toFixed(0)}ms`);
+                        document.getElementById('progressContainer').style.display = 'none';
+                        break;
+                        
+                    case 'error':
+                        log(`错误: ${data.error}`);
+                        document.getElementById('progressContainer').style.display = 'none';
+                        break;
+                }
+            };
+            
+            ws.onclose = function() {
+                log('WebSocket连接已关闭');
+                updateStatus(false);
+                document.getElementById('progressContainer').style.display = 'none';
+            };
+            
+            ws.onerror = function(error) {
+                log(`WebSocket错误: ${error}`);
+                updateStatus(false);
+            };
+        }
+        
+        function synthesize() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WebSocket未连接');
+                return;
+            }
+            
+            const text = document.getElementById('text').value;
+            const frameSize = parseInt(document.getElementById('frameSize').value);
+            const speaker = document.getElementById('speaker').value;
+            
+            if (!text.trim()) {
+                log('请输入文本内容');
+                return;
+            }
+            
+            const request = {
+                text: text,
+                frame_size: frameSize,
+                speaker: speaker
+            };
+            
+            log(`发送合成请求: ${JSON.stringify(request)}`);
+            ws.send(JSON.stringify(request));
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+        
+        function handleAudioFrame(frameData) {
+            // 解码音频数据
+            const audioData = atob(frameData.data);
+            const audioArray = new Float32Array(audioData.buffer);
+            
+            // 将音频帧加入队列
+            audioQueue.push(audioArray);
+            
+            // 如果还没开始播放，开始播放
+            if (!isPlaying) {
+                playAudioQueue();
+            }
+        }
+        
+        async function playAudioQueue() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            isPlaying = true;
+            
+            while (audioQueue.length > 0) {
+                const audioArray = audioQueue.shift();
+                
+                // 创建音频缓冲区
+                const audioBuffer = audioContext.createBuffer(1, audioArray.length, 22050);
+                audioBuffer.getChannelData(0).set(audioArray);
+                
+                // 创建音频源并播放
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                source.start();
+                
+                // 等待播放完成
+                await new Promise(resolve => {
+                    source.onended = resolve;
+                });
+            }
+            
+            isPlaying = false;
+        }
+        
+        // 页面加载完成后的初始化
+        window.onload = function() {
+            log('WebSocket TTS测试页面已加载');
+        };
+    </script>
+</body>
+</html> 

@@ -80,7 +80,13 @@ python run.py
 
 ## 访问测试页面
 
-打开浏览器访问：http://localhost:8422
+打开浏览器访问：http://localhost:8421
+
+### WebSocket流式接口测试
+
+访问：http://localhost:8421/static/websocket_test.html
+
+支持实时音频流式播放，体验更流畅的语音合成效果。
 
 ## 压测
 
@@ -89,7 +95,78 @@ python run.py
 python stress_test.py
 
 # 自定义参数压测
-python stress_test.py --url http://localhost:8421 --concurrent 4 --total 20  --lang en
+python stress_test.py --url http://localhost:8421 --concurrent 4 --total 20
+
+# 指定语言测试
+python stress_test.py --lang en  # 只测试英文
+python stress_test.py --lang zh  # 只测试中文
+python stress_test.py --lang both  # 中英文混合测试
+```
+
+## API接口
+
+### REST API
+
+#### 语音合成接口
+```
+POST /synthesize
+Content-Type: application/json
+
+{
+    "text": "要合成的文本",
+    "speaker": "default",
+    "timeout": 30.0
+}
+```
+
+### WebSocket API
+
+#### 流式语音合成接口
+```
+WebSocket: ws://localhost:8421/ws/synthesize
+```
+
+**客户端请求:**
+```json
+{
+    "text": "要合成的文本",
+    "frame_size": 2048,
+    "speaker": "default"
+}
+```
+
+**服务端响应序列:**
+```json
+// 1. 开始消息
+{
+    "type": "start",
+    "text": "要合成的文本",
+    "frame_size": 2048,
+    "speaker": "default"
+}
+
+// 2. 合成完成消息
+{
+    "type": "synthesized",
+    "audio_length": 48576,
+    "duration_ms": 2200
+}
+
+// 3. 音频帧消息（多个）
+{
+    "type": "audio_frame",
+    "frame_id": 1,
+    "data": "base64_encoded_audio_data",
+    "timestamp_ms": 0,
+    "is_last": false
+}
+
+// 4. 完成消息
+{
+    "type": "complete",
+    "total_frames": 24,
+    "total_duration_ms": 2200
+}
 ```
 
 ## 设备支持

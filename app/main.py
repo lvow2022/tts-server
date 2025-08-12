@@ -1,10 +1,12 @@
 import asyncio
 import time
 import logging
+import base64
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -26,6 +28,36 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 tts_manager = None
 executor = None
 start_time = None
+
+def split_audio_to_frames(audio: np.ndarray, frame_size: int = 2048, sample_rate: int = 22050):
+    """将完整音频分割成帧并模拟流式发送"""
+    frames = []
+    frame_duration_ms = (frame_size / sample_rate) * 1000  # 每帧时长(ms)
+    
+    for i in range(0, len(audio), frame_size):
+        frame = audio[i:i + frame_size]
+        frames.append({
+            "frame_id": len(frames) + 1,
+            "data": frame,
+            "timestamp_ms": len(frames) * frame_duration_ms,
+            "is_last": i + frame_size >= len(audio)
+        })
+    
+    return frames
+
+async def synthesize_audio_async(text: str, speaker: str = "default", timeout: float = 30.0):
+    """异步执行TTS合成"""
+    loop = asyncio.get_event_loop()
+    
+    result = await loop.run_in_executor(
+        executor,
+        tts_manager.synthesize,
+        text,
+        speaker,
+        timeout
+    )
+    
+    return result
 
 # 请求模型
 class SynthesisRequest(BaseModel):
@@ -202,6 +234,91 @@ async def get_engine_status():
             status_code=500,
             content={"error": str(e), "timestamp": time.time()}
         )
+
+@app.websocket("/ws/synthesize")
+async def websocket_synthesize(websocket: WebSocket):
+    """WebSocket流式语音合成接口"""
+    await websocket.accept()
+    
+    try:
+        # 1. 接收请求
+        data = await websocket.receive_json()
+        text = data.get("text")
+        frame_size = data.get("frame_size", 2048)
+        speaker = data.get("speaker", "default")
+        
+        if not text:
+            await websocket.send_json({
+                "type": "error",
+                "error": "Text is required"
+            })
+            return
+        
+        # 2. 发送开始消息
+        await websocket.send_json({
+            "type": "start",
+            "text": text,
+            "frame_size": frame_size,
+            "speaker": speaker
+        })
+        
+        # 3. 执行TTS合成（等待完整音频）
+        result = await synthesize_audio_async(text, speaker)
+        
+        if result["success"]:
+            # 获取音频数据
+            audio_data = result["data"]["audio"]
+            # 解码base64音频数据
+            audio_bytes = base64.b64decode(audio_data)
+            # 转换为numpy数组
+            audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
+            
+            # 4. 发送合成完成消息
+            await websocket.send_json({
+                "type": "synthesized",
+                "audio_length": len(audio_array),
+                "duration_ms": len(audio_array) / 22050 * 1000
+            })
+            
+            # 5. 分帧并快速发送
+            audio_frames = split_audio_to_frames(audio_array, frame_size)
+            
+            for frame in audio_frames:
+                frame_data = {
+                    "type": "audio_frame",
+                    "frame_id": frame["frame_id"],
+                    "data": base64.b64encode(frame["data"].tobytes()).decode(),
+                    "timestamp_ms": frame["timestamp_ms"],
+                    "is_last": frame["is_last"]
+                }
+                await websocket.send_json(frame_data)
+                
+                # 模拟实时发送间隔（可选）
+                await asyncio.sleep(0.01)  # 10ms间隔
+            
+            # 6. 发送完成消息
+            await websocket.send_json({
+                "type": "complete",
+                "total_frames": len(audio_frames),
+                "total_duration_ms": len(audio_array) / 22050 * 1000
+            })
+        else:
+            await websocket.send_json({
+                "type": "error",
+                "error": result["error"]
+            })
+            
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket synthesis error: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": str(e)
+            })
+        except:
+            pass
 
 if __name__ == "__main__":
     import uvicorn
