@@ -126,6 +126,7 @@ class TTSEngine:
             # 执行TTS推理
             with torch.no_grad():  # 禁用梯度计算以提高性能
                 audio = self.model.tts(text)
+                logger.debug(f"TTS模型返回音频类型: {type(audio)}, 长度: {len(audio) if hasattr(audio, '__len__') else 'N/A'}")
             
             inference_time = time.time() - start_time
             logger.info(f"Engine {self.engine_id} TTS inference completed in {inference_time:.3f}s on {self.device}")
@@ -134,8 +135,12 @@ class TTSEngine:
             audio_base64 = audio_to_base64(audio, self.sample_rate, self.audio_format)
             
             # 确保音频数据是列表格式
-            if hasattr(audio, 'tolist'):
+            logger.debug(f"音频数据类型: {type(audio)}, 长度: {len(audio)}")
+            
+            if isinstance(audio, np.ndarray):
                 audio_list = audio.tolist()
+            elif isinstance(audio, list):
+                audio_list = audio
             else:
                 audio_list = list(audio)
                 
