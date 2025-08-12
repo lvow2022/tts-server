@@ -94,6 +94,14 @@
                     })
                 });
                 
+                log(`响应状态: ${response.status} ${response.statusText}`);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    log(`服务器错误: ${errorText}`);
+                    return;
+                }
+                
                 const result = await response.json();
                 
                 if (result.success) {
