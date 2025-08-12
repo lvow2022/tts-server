@@ -284,7 +284,7 @@
                 const audioData = atob(frameData.data);
                 const uint8Array = new Uint8Array(audioData);
                 
-                log(`音频帧 ${frameData.frame_id}: 原始字节长度 ${uint8Array.length}`);
+                log(`音频帧 ${frameData.frame_id}: 字节长度 ${uint8Array.length}`);
                 
                 // 检查字节长度是否为4的倍数（Float32每个值4字节）
                 if (uint8Array.length % 4 !== 0) {
@@ -313,15 +313,6 @@
             } catch (error) {
                 log(`音频帧处理错误: ${error}`);
                 log(`原始数据长度: ${frameData.data.length}`);
-                
-                // 尝试调试：显示原始数据的详细信息
-                try {
-                    const audioData = atob(frameData.data);
-                    log(`解码后字节长度: ${audioData.length}`);
-                    log(`前10个字节: ${Array.from(new Uint8Array(audioData.slice(0, 10)))}`);
-                } catch (e) {
-                    log(`调试解码失败: ${e}`);
-                }
             }
         }
         

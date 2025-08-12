@@ -50,6 +50,28 @@ def split_audio_to_frames(audio: np.ndarray, frame_size: int = 2048, sample_rate
     
     return frames
 
+def split_audio_bytes_to_frames(audio_bytes: bytes, frame_size: int = 2048, sample_rate: int = 22050):
+    """将音频bytes数据分割成帧"""
+    frames = []
+    frame_duration_ms = (frame_size / sample_rate) * 1000  # 每帧时长(ms)
+    bytes_per_frame = frame_size * 4  # 4字节/float32
+    
+    for i in range(0, len(audio_bytes), bytes_per_frame):
+        frame_bytes = audio_bytes[i:i + bytes_per_frame]
+        
+        # 跳过空帧
+        if len(frame_bytes) == 0:
+            continue
+            
+        frames.append({
+            "frame_id": len(frames) + 1,
+            "data": frame_bytes,
+            "timestamp_ms": len(frames) * frame_duration_ms,
+            "is_last": i + bytes_per_frame >= len(audio_bytes)
+        })
+    
+    return frames
+
 async def synthesize_audio_async(text: str, speaker: str = "default", timeout: float = 30.0):
     """异步执行TTS合成"""
     loop = asyncio.get_event_loop()
@@ -271,29 +293,28 @@ async def websocket_synthesize(websocket: WebSocket):
         result = await synthesize_audio_async(text, speaker)
         
         if result["success"]:
-            # 获取音频数据 - 直接使用原始numpy数组
-            audio_array = result["data"]["audio_raw"]  # 需要修改TTS引擎返回原始数据
+            # 获取音频数据 - 使用bytes格式
+            audio_bytes = base64.b64decode(result["data"]["audio_bytes"])
             
             # 4. 发送合成完成消息
+            total_samples = len(audio_bytes) // 4  # 4字节/float32
             await websocket.send_json({
                 "type": "synthesized",
-                "audio_length": len(audio_array),
-                "duration_ms": len(audio_array) / 22050 * 1000
+                "audio_length": total_samples,
+                "duration_ms": total_samples / 22050 * 1000
             })
             
             # 5. 分帧并快速发送
-            audio_frames = split_audio_to_frames(audio_array, frame_size)
+            audio_frames = split_audio_bytes_to_frames(audio_bytes, frame_size)
             
-            logger.info(f"音频总长度: {len(audio_array)}, 分帧数: {len(audio_frames)}")
+            logger.info(f"音频总长度: {total_samples} 采样点, 分帧数: {len(audio_frames)}")
             
             for frame in audio_frames:
-                # 确保numpy数组使用小端字节序
-                frame_bytes = frame["data"].astype(np.float32).tobytes()
-                logger.debug(f"发送帧 {frame['frame_id']}: {len(frame['data'])} 采样点, {len(frame_bytes)} 字节")
+                logger.debug(f"发送帧 {frame['frame_id']}: {len(frame['data'])} 字节")
                 frame_data = {
                     "type": "audio_frame",
                     "frame_id": frame["frame_id"],
-                    "data": base64.b64encode(frame_bytes).decode(),
+                    "data": base64.b64encode(frame["data"]).decode(),
                     "timestamp_ms": frame["timestamp_ms"],
                     "is_last": frame["is_last"]
                 }

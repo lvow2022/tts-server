@@ -134,21 +134,21 @@ class TTSEngine:
             # 转换为base64
             audio_base64 = audio_to_base64(audio, self.sample_rate, self.audio_format)
             
-            # 确保音频数据是列表格式
+            # 确保音频数据是numpy数组并转换为bytes
             logger.debug(f"音频数据类型: {type(audio)}, 长度: {len(audio)}")
             
             if isinstance(audio, np.ndarray):
-                audio_list = audio.tolist()
+                audio_bytes = audio.tobytes()
             elif isinstance(audio, list):
-                audio_list = audio
+                audio_bytes = np.array(audio, dtype=np.float32).tobytes()
             else:
-                audio_list = list(audio)
+                audio_bytes = np.array(audio, dtype=np.float32).tobytes()
                 
             return format_response(
                 success=True,
                 data={
                     "audio": audio_base64,
-                    "audio_raw": audio_list,  # 转换为Python列表以便JSON序列化
+                    "audio_bytes": base64.b64encode(audio_bytes).decode(),  # bytes格式的base64编码
                     "sample_rate": self.sample_rate,
                     "format": self.audio_format,
                     "text": text,
