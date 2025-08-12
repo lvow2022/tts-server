@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"time"
-
 	"tts-client/tts"
 )
 
@@ -20,7 +19,7 @@ func main() {
 	text := os.Args[1]
 
 	// 创建TTS客户端
-	client := tts.NewTTSClient("ws://localhost:8421/ws/synthesize")
+	client := tts.NewTTSClient("ws://192.168.1.167:8421/ws/synthesize")
 	defer client.Close()
 
 	// 测试不同的音频参数

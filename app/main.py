@@ -126,7 +126,6 @@ def save_audio_to_wav(audio_bytes: bytes, filename: str, sample_rate: int = 2205
                 # 写入音频数据
                 f.write(audio_bytes)
         
-        logger.info(f"音频已保存到: {filepath}")
         return filepath
         
     except Exception as e:
@@ -396,6 +395,8 @@ async def websocket_synthesize(websocket: WebSocket):
             "frame_duration_ms": frame_duration_ms
         })
         
+        logger.info(f"发送音频参数: 采样率={sample_rate}Hz, 位深度={bit_depth}bit, 帧大小={frame_size}, 帧时长={frame_duration_ms}ms")
+        
         # 3. 执行TTS合成（等待完整音频）
         result = await synthesize_audio_async(text, speaker)
         
@@ -439,6 +440,20 @@ async def websocket_synthesize(websocket: WebSocket):
             
             logger.info(f"音频总长度: {total_samples} 采样点, 分帧数: {len(audio_frames)}")
             
+            # 保存分帧后的完整音频（用于调试）
+            all_frames_bytes = b''
+            for frame in audio_frames:
+                all_frames_bytes += frame["data"]
+            
+            # 保存分帧后的音频
+            frames_filename = f"debug_frames_{timestamp}_{sample_rate}Hz_{bit_depth}bit.wav"
+            frames_saved_path = save_audio_to_wav(all_frames_bytes, frames_filename, sample_rate, bit_depth)
+            
+            if frames_saved_path:
+                logger.info(f"分帧后音频已保存: {frames_saved_path}")
+                logger.info(f"分帧后音频信息: {len(all_frames_bytes)} 字节, 采样率: {sample_rate}Hz, 位深度: {bit_depth}bit")
+            
+            # 发送音频帧
             for frame in audio_frames:
                 logger.debug(f"发送帧 {frame['frame_id']}: {len(frame['data'])} 字节")
                 
