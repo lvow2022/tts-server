@@ -121,6 +121,7 @@
         <button id="connectBtn" onclick="connect()">连接</button>
         <button id="synthesizeBtn" onclick="synthesize()" disabled>开始合成</button>
         <button id="disconnectBtn" onclick="disconnect()" disabled>断开连接</button>
+        <button id="initAudioBtn" onclick="initAudio()">初始化音频</button>
         
         <div id="status" class="status disconnected">
             状态: 未连接
@@ -258,47 +259,102 @@
             }
         }
         
+        function initAudio() {
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    log('音频上下文已创建');
+                }
+                
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume().then(() => {
+                        log('音频上下文已恢复，可以播放音频');
+                    });
+                } else {
+                    log('音频上下文状态: ' + audioContext.state);
+                }
+            } catch (error) {
+                log('初始化音频失败: ' + error);
+            }
+        }
+        
         function handleAudioFrame(frameData) {
-            // 解码音频数据
-            const audioData = atob(frameData.data);
-            const audioArray = new Float32Array(audioData.buffer);
-            
-            // 将音频帧加入队列
-            audioQueue.push(audioArray);
-            
-            // 如果还没开始播放，开始播放
-            if (!isPlaying) {
-                playAudioQueue();
+            try {
+                // 解码音频数据
+                const audioData = atob(frameData.data);
+                const audioArray = new Float32Array(audioData.buffer);
+                
+                log(`音频帧 ${frameData.frame_id}: ${audioArray.length} 采样点`);
+                
+                // 将音频帧加入队列
+                audioQueue.push(audioArray);
+                
+                // 如果还没开始播放，开始播放
+                if (!isPlaying) {
+                    playAudioQueue();
+                }
+            } catch (error) {
+                log(`音频帧处理错误: ${error}`);
+                // 尝试备用解码方法
+                try {
+                    const audioData = atob(frameData.data);
+                    const uint8Array = new Uint8Array(audioData);
+                    const audioArray = new Float32Array(uint8Array.buffer);
+                    
+                    log(`备用解码成功: ${audioArray.length} 采样点`);
+                    audioQueue.push(audioArray);
+                    
+                    if (!isPlaying) {
+                        playAudioQueue();
+                    }
+                } catch (error2) {
+                    log(`备用解码也失败: ${error2}`);
+                }
             }
         }
         
         async function playAudioQueue() {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    // 如果AudioContext被暂停，需要用户交互来恢复
+                    if (audioContext.state === 'suspended') {
+                        log('需要用户交互来启动音频播放');
+                        await audioContext.resume();
+                    }
+                }
+                
+                isPlaying = true;
+                log('开始播放音频队列');
+                
+                while (audioQueue.length > 0) {
+                    const audioArray = audioQueue.shift();
+                    
+                    // 创建音频缓冲区
+                    const audioBuffer = audioContext.createBuffer(1, audioArray.length, 22050);
+                    audioBuffer.getChannelData(0).set(audioArray);
+                    
+                    // 创建音频源并播放
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioContext.destination);
+                    source.start();
+                    
+                    log(`播放音频帧: ${audioArray.length} 采样点`);
+                    
+                    // 等待播放完成
+                    await new Promise(resolve => {
+                        source.onended = resolve;
+                    });
+                }
+                
+                isPlaying = false;
+                log('音频播放完成');
+            } catch (error) {
+                log(`音频播放错误: ${error}`);
+                isPlaying = false;
             }
-            
-            isPlaying = true;
-            
-            while (audioQueue.length > 0) {
-                const audioArray = audioQueue.shift();
-                
-                // 创建音频缓冲区
-                const audioBuffer = audioContext.createBuffer(1, audioArray.length, 22050);
-                audioBuffer.getChannelData(0).set(audioArray);
-                
-                // 创建音频源并播放
-                const source = audioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContext.destination);
-                source.start();
-                
-                // 等待播放完成
-                await new Promise(resolve => {
-                    source.onended = resolve;
-                });
-            }
-            
-            isPlaying = false;
         }
         
         // 页面加载完成后的初始化
