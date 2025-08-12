@@ -131,9 +131,18 @@ WebSocket: ws://localhost:8421/ws/synthesize
 {
     "text": "要合成的文本",
     "frame_size": 2048,
-    "speaker": "default"
+    "speaker": "default",
+    "sample_rate": 22050,
+    "bit_depth": 32,
+    "frame_duration_ms": 20
 }
 ```
+
+**音频参数说明:**
+- `sample_rate`: 采样率（Hz），默认22050，支持16000等
+- `bit_depth`: 位深度，默认32，支持16
+- `frame_duration_ms`: 帧时长（毫秒），可选，如20ms
+- `frame_size`: 帧大小（采样点数），与frame_duration_ms二选一
 
 **服务端响应序列:**
 ```json
@@ -142,7 +151,10 @@ WebSocket: ws://localhost:8421/ws/synthesize
     "type": "start",
     "text": "要合成的文本",
     "frame_size": 2048,
-    "speaker": "default"
+    "speaker": "default",
+    "sample_rate": 22050,
+    "bit_depth": 32,
+    "frame_duration_ms": 20
 }
 
 // 2. 合成完成消息

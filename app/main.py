@@ -50,11 +50,29 @@ def split_audio_to_frames(audio: np.ndarray, frame_size: int = 2048, sample_rate
     
     return frames
 
-def split_audio_bytes_to_frames(audio_bytes: bytes, frame_size: int = 2048, sample_rate: int = 22050):
-    """将音频bytes数据分割成帧"""
+def split_audio_bytes_to_frames(audio_bytes: bytes, frame_size: int = 2048, sample_rate: int = 22050, 
+                               bit_depth: int = 32, frame_duration_ms: int = None):
+    """将音频bytes数据分割成帧
+    
+    Args:
+        audio_bytes: 音频字节数据
+        frame_size: 帧大小（采样点数）
+        sample_rate: 采样率（Hz）
+        bit_depth: 位深度（16或32）
+        frame_duration_ms: 帧时长（毫秒），如果指定则覆盖frame_size
+    """
     frames = []
-    frame_duration_ms = (frame_size / sample_rate) * 1000  # 每帧时长(ms)
-    bytes_per_frame = frame_size * 4  # 4字节/float32
+    
+    # 如果指定了帧时长，计算对应的帧大小
+    if frame_duration_ms is not None:
+        frame_size = int(sample_rate * frame_duration_ms / 1000)
+    
+    # 根据位深度计算字节数
+    bytes_per_sample = bit_depth // 8
+    bytes_per_frame = frame_size * bytes_per_sample
+    
+    # 计算帧时长
+    frame_duration_ms_calc = (frame_size / sample_rate) * 1000
     
     for i in range(0, len(audio_bytes), bytes_per_frame):
         frame_bytes = audio_bytes[i:i + bytes_per_frame]
@@ -66,7 +84,7 @@ def split_audio_bytes_to_frames(audio_bytes: bytes, frame_size: int = 2048, samp
         frames.append({
             "frame_id": len(frames) + 1,
             "data": frame_bytes,
-            "timestamp_ms": len(frames) * frame_duration_ms,
+            "timestamp_ms": len(frames) * frame_duration_ms_calc,
             "is_last": i + bytes_per_frame >= len(audio_bytes)
         })
     
@@ -273,6 +291,9 @@ async def websocket_synthesize(websocket: WebSocket):
         text = data.get("text")
         frame_size = data.get("frame_size", 2048)
         speaker = data.get("speaker", "default")
+        sample_rate = data.get("sample_rate", 22050)
+        bit_depth = data.get("bit_depth", 32)
+        frame_duration_ms = data.get("frame_duration_ms")  # 可选，毫秒
         
         if not text:
             await websocket.send_json({
@@ -286,7 +307,10 @@ async def websocket_synthesize(websocket: WebSocket):
             "type": "start",
             "text": text,
             "frame_size": frame_size,
-            "speaker": speaker
+            "speaker": speaker,
+            "sample_rate": sample_rate,
+            "bit_depth": bit_depth,
+            "frame_duration_ms": frame_duration_ms
         })
         
         # 3. 执行TTS合成（等待完整音频）
@@ -297,15 +321,18 @@ async def websocket_synthesize(websocket: WebSocket):
             audio_bytes = base64.b64decode(result["data"]["audio_pcm"])
             
             # 4. 发送合成完成消息
-            total_samples = len(audio_bytes) // 4  # 4字节/float32
+            bytes_per_sample = bit_depth // 8
+            total_samples = len(audio_bytes) // bytes_per_sample
             await websocket.send_json({
                 "type": "synthesized",
                 "audio_length": total_samples,
-                "duration_ms": total_samples / 22050 * 1000
+                "duration_ms": total_samples / sample_rate * 1000
             })
             
             # 5. 分帧并快速发送
-            audio_frames = split_audio_bytes_to_frames(audio_bytes, frame_size)
+            audio_frames = split_audio_bytes_to_frames(
+                audio_bytes, frame_size, sample_rate, bit_depth, frame_duration_ms
+            )
             
             logger.info(f"音频总长度: {total_samples} 采样点, 分帧数: {len(audio_frames)}")
             
@@ -329,7 +356,7 @@ async def websocket_synthesize(websocket: WebSocket):
             await websocket.send_json({
                 "type": "complete",
                 "total_frames": len(audio_frames),
-                "total_duration_ms": total_samples / 22050 * 1000
+                "total_duration_ms": total_samples / sample_rate * 1000
             })
         else:
             await websocket.send_json({
