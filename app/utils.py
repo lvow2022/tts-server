@@ -49,6 +49,51 @@ def base64_to_audio(audio_base64: str) -> np.ndarray:
     audio, sample_rate = sf.read(buffer)
     return audio
 
+def convert_audio_format(audio, target_sample_rate: int = 22050, target_bit_depth: int = 32):
+    """转换音频格式
+    
+    Args:
+        audio: 原始音频数据（numpy数组）
+        target_sample_rate: 目标采样率
+        target_bit_depth: 目标位深度
+    """
+    try:
+        # 确保音频数据是numpy数组
+        if isinstance(audio, list):
+            audio = np.array(audio, dtype=np.float32)
+        elif not isinstance(audio, np.ndarray):
+            audio = np.array(audio, dtype=np.float32)
+        
+        # 重采样（如果需要）
+        if target_sample_rate != 22050:  # TTS模型默认输出22050Hz
+            try:
+                import librosa
+                audio = librosa.resample(audio, orig_sr=22050, target_sr=target_sample_rate)
+            except ImportError:
+                # 如果没有librosa，使用简单的重采样
+                ratio = target_sample_rate / 22050
+                new_length = int(len(audio) * ratio)
+                indices = np.linspace(0, len(audio) - 1, new_length)
+                audio = np.interp(indices, np.arange(len(audio)), audio)
+        
+        # 转换位深度
+        if target_bit_depth == 16:
+            # 转换为16位整数
+            audio = np.clip(audio, -1.0, 1.0)  # 限制范围
+            audio = (audio * 32767).astype(np.int16)
+            return audio.tobytes()
+        else:
+            # 保持32位浮点
+            return audio.astype(np.float32).tobytes()
+            
+    except Exception as e:
+        logging.error(f"音频格式转换失败: {e}")
+        # 返回原始格式
+        if isinstance(audio, np.ndarray):
+            return audio.tobytes()
+        else:
+            return np.array(audio, dtype=np.float32).tobytes()
+
 def validate_text(text: str, max_length: int = 500) -> bool:
     """验证文本输入"""
     if not text or not text.strip():
