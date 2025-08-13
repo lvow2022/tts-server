@@ -468,7 +468,7 @@ async def websocket_synthesize(websocket: WebSocket):
                 await websocket.send_json(frame_data)
                 
                 # 模拟实时发送间隔（可选）
-                await asyncio.sleep(0.01)  # 10ms间隔
+                await asyncio.sleep(0.02)  # 10ms间隔
             
             # 6. 发送完成消息
             await websocket.send_json({

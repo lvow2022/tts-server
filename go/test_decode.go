@@ -28,14 +28,6 @@ func main() {
 		params tts.SynthesisRequest
 	}{
 		{
-			name: "默认参数 (22050Hz, 32bit)",
-			params: tts.SynthesisRequest{
-				Text:      text,
-				FrameSize: 2048,
-				Speaker:   "default",
-			},
-		},
-		{
 			name: "16000Hz, 16bit, 20ms",
 			params: tts.SynthesisRequest{
 				Text:            text,
