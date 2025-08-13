@@ -3,7 +3,6 @@ import time
 import logging
 import base64
 import numpy as np
-import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any
 
@@ -51,86 +50,7 @@ def split_audio_to_frames(audio: np.ndarray, frame_size: int = 2048, sample_rate
     
     return frames
 
-def save_audio_to_wav(audio_bytes: bytes, filename: str, sample_rate: int = 22050, bit_depth: int = 32):
-    """保存音频字节数据为WAV文件
-    
-    Args:
-        audio_bytes: 音频字节数据
-        filename: 文件名
-        sample_rate: 采样率
-        bit_depth: 位深度
-    """
-    try:
-        # 确保目录存在
-        os.makedirs("debug_audio", exist_ok=True)
-        filepath = os.path.join("debug_audio", filename)
-        
-        # 根据位深度确定音频格式
-        if bit_depth == 16:
-            # 16位整数PCM
-            import struct
-            with open(filepath, 'wb') as f:
-                # WAV文件头
-                # RIFF头
-                f.write(b'RIFF')
-                # 文件大小（减去8字节的RIFF头）
-                file_size = len(audio_bytes) + 36
-                f.write(struct.pack('<I', file_size))
-                # WAVE标识
-                f.write(b'WAVE')
-                
-                # fmt子块
-                f.write(b'fmt ')
-                f.write(struct.pack('<I', 16))  # fmt子块大小
-                f.write(struct.pack('<H', 1))   # 音频格式（PCM = 1）
-                f.write(struct.pack('<H', 1))   # 声道数（单声道 = 1）
-                f.write(struct.pack('<I', sample_rate))  # 采样率
-                f.write(struct.pack('<I', sample_rate * 2))  # 字节率
-                f.write(struct.pack('<H', 2))   # 块对齐
-                f.write(struct.pack('<H', 16))  # 每样本位数
-                
-                # data子块
-                f.write(b'data')
-                f.write(struct.pack('<I', len(audio_bytes)))  # 数据大小
-                
-                # 写入音频数据
-                f.write(audio_bytes)
-                
-        else:
-            # 32位浮点PCM
-            import struct
-            with open(filepath, 'wb') as f:
-                # WAV文件头
-                # RIFF头
-                f.write(b'RIFF')
-                # 文件大小（减去8字节的RIFF头）
-                file_size = len(audio_bytes) + 36
-                f.write(struct.pack('<I', file_size))
-                # WAVE标识
-                f.write(b'WAVE')
-                
-                # fmt子块
-                f.write(b'fmt ')
-                f.write(struct.pack('<I', 16))  # fmt子块大小
-                f.write(struct.pack('<H', 3))   # 音频格式（IEEE浮点 = 3）
-                f.write(struct.pack('<H', 1))   # 声道数（单声道 = 1）
-                f.write(struct.pack('<I', sample_rate))  # 采样率
-                f.write(struct.pack('<I', sample_rate * 4))  # 字节率
-                f.write(struct.pack('<H', 4))   # 块对齐
-                f.write(struct.pack('<H', 32))  # 每样本位数
-                
-                # data子块
-                f.write(b'data')
-                f.write(struct.pack('<I', len(audio_bytes)))  # 数据大小
-                
-                # 写入音频数据
-                f.write(audio_bytes)
-        
-        return filepath
-        
-    except Exception as e:
-        logger.error(f"保存音频文件失败: {e}")
-        return None
+
 
 def split_audio_bytes_to_frames(audio_bytes: bytes, frame_size: int = 2048, sample_rate: int = 22050, 
                                bit_depth: int = 32, frame_duration_ms: int = None):
@@ -414,15 +334,8 @@ async def websocket_synthesize(websocket: WebSocket):
             # 转换到目标格式
             audio_bytes = convert_audio_format(original_audio, sample_rate, bit_depth)
             
-            # 保存音频到本地文件（用于调试）
-            timestamp = int(time.time())
-            filename = f"debug_{timestamp}_{sample_rate}Hz_{bit_depth}bit.wav"
-            saved_path = save_audio_to_wav(audio_bytes, filename, sample_rate, bit_depth)
-            
-            if saved_path:
-                logger.info(f"调试音频已保存: {saved_path}")
-                logger.info(f"音频信息: {len(audio_bytes)} 字节, 采样率: {sample_rate}Hz, 位深度: {bit_depth}bit")
-                logger.info(f"原始音频: {len(original_audio)} 采样点, 转换后: {len(audio_bytes)} 字节")
+            logger.info(f"音频信息: {len(audio_bytes)} 字节, 采样率: {sample_rate}Hz, 位深度: {bit_depth}bit")
+            logger.info(f"原始音频: {len(original_audio)} 采样点, 转换后: {len(audio_bytes)} 字节")
             
             # 4. 发送合成完成消息
             bytes_per_sample = bit_depth // 8
@@ -439,19 +352,6 @@ async def websocket_synthesize(websocket: WebSocket):
             )
             
             logger.info(f"音频总长度: {total_samples} 采样点, 分帧数: {len(audio_frames)}")
-            
-            # 保存分帧后的完整音频（用于调试）
-            all_frames_bytes = b''
-            for frame in audio_frames:
-                all_frames_bytes += frame["data"]
-            
-            # 保存分帧后的音频
-            frames_filename = f"debug_frames_{timestamp}_{sample_rate}Hz_{bit_depth}bit.wav"
-            frames_saved_path = save_audio_to_wav(all_frames_bytes, frames_filename, sample_rate, bit_depth)
-            
-            if frames_saved_path:
-                logger.info(f"分帧后音频已保存: {frames_saved_path}")
-                logger.info(f"分帧后音频信息: {len(all_frames_bytes)} 字节, 采样率: {sample_rate}Hz, 位深度: {bit_depth}bit")
             
             # 发送音频帧
             for frame in audio_frames:
